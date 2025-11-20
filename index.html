@@ -2,674 +2,132 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Life Compass - Colab Edition (Stable & Native)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Life Compass - Cloud Edition</title>
+  
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#f8fafc">
+  <meta name="mobile-web-app-capable" content="yes">
   
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- 1. 設定 process.env -->
-  <script>
-    window.process = { env: { NODE_ENV: 'production' } };
-  </script>
-
-  <!-- 2. React 核心 -->
+  <script>window.process = { env: { NODE_ENV: 'production' } };</script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  
-  <!-- 3. Recharts 依賴 (保留圖表功能) -->
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
   <script crossorigin src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js"></script>
-  
-  <!-- 4. Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- 注意：已移除外部 Icon 庫依賴，改用內建 SVG 以確保穩定性 -->
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
-    body {
-      font-family: 'Noto Sans TC', sans-serif;
-      background-color: #f8fafc;
-      height: 100vh;
-      overflow-y: auto;
-    }
-    @keyframes float {
-      0% { transform: translateY(0px); }
-      50% { transform: translateY(-6px); }
-      100% { transform: translateY(0px); }
-    }
-    .animate-float { animation: float 4s ease-in-out infinite; }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; height: 100vh; overflow-y: auto; overscroll-behavior-y: none; }
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    /* 動畫效果 */
+    @keyframes pulse-subtle { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    .animate-pulse-subtle { animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef, Component } = React;
+    // --- 設定區：你的雲端大腦網址 ---
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx4S4xt6GsA_Ffdayxg6xHC3wfiKJGdHO8I9hXciCLD27_wCAXgo5TCrYb4a5qSn-K8mQ/exec";
+
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
     const { createRoot } = ReactDOM;
-    
-    // 安全解構 Recharts
-    const { 
-      Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, 
-      ResponsiveContainer, Legend, Tooltip 
-    } = window.Recharts || {};
+    const { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Legend, Tooltip } = window.Recharts || {};
 
-    // --- 核心優化：內建 SVG Icon 系統 (取代外部 Lucide 庫) ---
+    // --- Icons ---
     const IconBase = ({ children, size = 24, className = "", ...props }) => (
-      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
-        {children}
-      </svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
     );
-
-    // 定義您內容中用到的所有 Icon
     const Icons = {
-      Compass: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></IconBase>,
-      Edit3: (props) => <IconBase {...props}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></IconBase>,
-      Grid: (props) => <IconBase {...props}><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></IconBase>,
-      MessageCircle: (props) => <IconBase {...props}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></IconBase>,
-      BookOpen: (props) => <IconBase {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></IconBase>,
-      Target: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></IconBase>,
-      Quote: (props) => <IconBase {...props}><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/></IconBase>,
-      Zap: (props) => <IconBase {...props}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></IconBase>,
-      Hash: (props) => <IconBase {...props}><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></IconBase>,
-      Plus: (props) => <IconBase {...props}><path d="M5 12h14"/><path d="M12 5v14"/></IconBase>,
-      Save: (props) => <IconBase {...props}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconBase>,
-      Sparkles: (props) => <IconBase {...props}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></IconBase>,
-      Trash2: (props) => <IconBase {...props}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></IconBase>,
-      Calendar: (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>,
-      ChevronRight: (props) => <IconBase {...props}><path d="m9 18 6-6-6-6"/></IconBase>,
-      Activity: (props) => <IconBase {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></IconBase>,
-      Tag: (props) => <IconBase {...props}><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><path d="M7 7h.01"/></IconBase>,
-      Check: (props) => <IconBase {...props}><polyline points="20 6 9 17 4 12"/></IconBase>,
-      ArrowRight: (props) => <IconBase {...props}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></IconBase>,
-      Flag: (props) => <IconBase {...props}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></IconBase>,
-      ChevronLeft: (props) => <IconBase {...props}><path d="m15 18-6-6 6-6"/></IconBase>,
-      CheckCircle: (props) => <IconBase {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconBase>,
-      Circle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/></IconBase>,
-      Download: (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
-      Upload: (props) => <IconBase {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></IconBase>,
-      FileJson: (props) => <IconBase {...props}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M10 12a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1"/><path d="M14 12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1"/></IconBase>,
-      Settings: (props) => <IconBase {...props}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></IconBase>
+      Compass: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></IconBase>,
+      Edit3: (p) => <IconBase {...p}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></IconBase>,
+      Grid: (p) => <IconBase {...p}><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></IconBase>,
+      MessageCircle: (p) => <IconBase {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></IconBase>,
+      BookOpen: (p) => <IconBase {...p}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></IconBase>,
+      Target: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></IconBase>,
+      Quote: (p) => <IconBase {...p}><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/></IconBase>,
+      Zap: (p) => <IconBase {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></IconBase>,
+      Save: (p) => <IconBase {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconBase>,
+      Sparkles: (p) => <IconBase {...p}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z"/></IconBase>,
+      Trash2: (p) => <IconBase {...p}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></IconBase>,
+      Calendar: (p) => <IconBase {...p}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></IconBase>,
+      ChevronRight: (p) => <IconBase {...p}><path d="m9 18 6-6-6-6"/></IconBase>,
+      CheckCircle: (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconBase>,
+      Circle: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/></IconBase>,
+      Settings: (p) => <IconBase {...p}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></IconBase>,
+      Cloud: (p) => <IconBase {...p}><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19h-2c-2.485 0-4.5-2.015-4.5-4.5S2.015 10 4.5 10c.174 0 .343.02.51.054C5.83 6.934 8.668 5 11.5 5c4.006 0 7.454 2.816 8.275 6.655 2.484.205 4.225 2.216 4.225 4.845C24 19.015 21.985 21 19.5 21h-2z"/></IconBase>,
+      CloudOff: (p) => <IconBase {...p}><path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 7h1.8a5 5 0 0 0 1.8 9h8.6"/><line x1="1" y1="1" x2="23" y2="23"/></IconBase>,
+      RefreshCw: (p) => <IconBase {...p}><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></IconBase>,
+      ChevronLeft: (p) => <IconBase {...p}><path d="m15 18-6-6 6-6"/></IconBase>,
+      ArrowRight: (p) => <IconBase {...p}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></IconBase>,
+      Plus: (p) => <IconBase {...p}><path d="M5 12h14"/><path d="M12 5v14"/></IconBase>
     };
+    
+    const { Compass, Edit3, Grid, MessageCircle, BookOpen, Target, Quote, Zap, Save, Sparkles, Trash2, Calendar, ChevronRight, CheckCircle, Circle, Settings, Cloud, CloudOff, RefreshCw, ChevronLeft, ArrowRight, Plus } = Icons;
 
-    // 解構 Icons，讓下方原有的程式碼可以無縫接軌使用 (無需修改內容邏輯)
-    const { 
-      Compass, Edit3, Grid, MessageCircle, BookOpen, Target, 
-      Quote, Zap, Hash, Plus, Save, Sparkles, Trash2, Calendar, 
-      ChevronRight, Activity, Tag, Check, ArrowRight, Flag, 
-      ChevronLeft, CheckCircle, Circle, Download, Upload, FileJson, Settings
-    } = Icons;
-
-
-    // --- 穩定版 API Helper (取代 Google SDK 以避免載入問題) ---
+    // --- API Helper ---
     const callGeminiAPI = async (apiKey, prompt, isJson = false) => {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: isJson ? { responseMimeType: "application/json" } : {}
-      };
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error?.message || 'API 請求失敗');
-      }
-      const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: isJson ? { responseMimeType: "application/json" } : {} };
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error((await response.json()).error?.message || 'API 請求失敗');
+      return (await response.json()).candidates?.[0]?.content?.parts?.[0]?.text || "";
     };
 
-    // --- Constants & Types Mock (保留您的內容) ---
-    
-    const AppTab = {
-      SELECTOR: 'selector',
-      DEFINITION: 'definition',
-      COMPASS: 'compass',
-      COACH: 'coach',
-      JOURNAL: 'journal',
-      PROJECTS: 'projects'
-    };
-
+    // --- Constants ---
+    const AppTab = { SELECTOR: 'selector', DEFINITION: 'definition', COMPASS: 'compass', COACH: 'coach', JOURNAL: 'journal', PROJECTS: 'projects' };
     const KEYWORD_GRID = [
-      ['成就', '真誠', '學習', '好奇', '健康', '好玩', '發現'],
-      ['成長', '果斷', '朋友', '勇敢', '實踐', '鼓勵', '卓越'],
-      ['美感', '理解', '勇敢', '表達', '鼓勵', '尊重', '公益'],
-      ['平衡', '穩定', '冒險', '忠誠', '紀律', '愛', '幽默'],
-      ['平靜', '公平', '承諾', '釋放', '投入', '懷舊', '自信'],
-      ['和諧', '正向', '領導', '和平', '專注', '真實', '肯定'],
-      ['創新', '野心', '支持', '實現', '想像力', '同理心', '靈性'],
-      ['創造', '多元', '服務', '影響力', '靈感', '夥伴', '溫和'],
-      ['金錢', '夥伴', '社群', '實驗', '感官', '安全感', '家人'],
-      ['理想', '堅定', '號召力', '自由', '風險', '幸福', '贏取'],
+      ['成就', '真誠', '學習', '好奇', '健康', '好玩', '發現'], ['成長', '果斷', '朋友', '勇敢', '實踐', '鼓勵', '卓越'],
+      ['美感', '理解', '勇敢', '表達', '鼓勵', '尊重', '公益'], ['平衡', '穩定', '冒險', '忠誠', '紀律', '愛', '幽默'],
+      ['平靜', '公平', '承諾', '釋放', '投入', '懷舊', '自信'], ['和諧', '正向', '領導', '和平', '專注', '真實', '肯定'],
+      ['創新', '野心', '支持', '實現', '想像力', '同理心', '靈性'], ['創造', '多元', '服務', '影響力', '靈感', '夥伴', '溫和'],
+      ['金錢', '夥伴', '社群', '實驗', '感官', '安全感', '家人'], ['理想', '堅定', '號召力', '自由', '風險', '幸福', '贏取']
     ];
-
     const INITIAL_SELECTED_VALUES = ['成長', '平衡', '好奇', '專注', '肯定'];
+    const DEFAULT_DEFINITIONS = { '成長': { career: '', relationship: '', life: '' }, '平衡': { career: '', relationship: '', life: '' }, '好奇': { career: '', relationship: '', life: '' }, '專注': { career: '', relationship: '', life: '' }, '肯定': { career: '', relationship: '', life: '' } };
+    const USER_PROFILE_DEFAULTS = { strengths: ['跨領域多能者', '傾向理性', '拆解問題'], roles: ['開拓者', '整合者'], philosophy: ['Dream big start small.', '痛苦 + 反省 = 進步。'] };
+    const CATEGORY_COLORS = { '個人發展': 'bg-red-100 text-red-700', '職涯規劃': 'bg-orange-100 text-orange-700', '健康管理': 'bg-green-100 text-green-700', '學習成長': 'bg-blue-100 text-blue-700', '科技應用': 'bg-purple-100 text-purple-700', '專業發展': 'bg-pink-100 text-pink-700', '品牌經營': 'bg-indigo-100 text-indigo-700' };
 
-    const DEFAULT_DEFINITIONS = {
-      '成長': {
-        career: '我希望我的職能是不斷成長的，在一個成長型公司服務，會帶來成就感，與工作夥伴一起成長一起著手於未來的發展。',
-        relationship: '我可以與伴侶一同成長，不論在身、心、靈，可以帶給彼此不同的視角並刺激我的思考，除了一起變老，我們的腦袋也要升級。',
-        life: '挑戰極限，不混淆願望與事實，客觀審視缺點並轉化為優勢。'
-      },
-      '平衡': {
-        career: '我生活與工作是平衡的，能有時間去探索自我的價值，輸出我對於世界的看法。互惠共利，交換不同觀點。',
-        relationship: '我與伴侶的關係是平衡的，不會過度依賴對方，保有自己的生活，在金錢方面我也希望不要有所虧欠造成心裡面的負擔。',
-        life: '維繫偉大的合作關係，比金錢更重要的是體貼和寬厚。'
-      },
-      '好奇': {
-        career: '我對事物是保持好奇心，探索不同技術找到共通點與奇異點並比較。探索事物的原理與新的題目去增進自己的技術能力。',
-        relationship: '保有神秘，讓對方有好奇心，有時候要像個小孩，去探索伴侶的喜好，這是生活上的情趣。',
-        life: '無法被系統性訓練的特定知識，透過追尋好奇心獲得。'
-      },
-      '專注': {
-        career: '我能夠專注在我喜歡的事物上，或是在工作上能夠100%的注意力全力以赴，不論失敗或成功我會享受在過程中。',
-        relationship: '在交流上我能專注在彼此的心靈陪伴，以及實際互動中的情感，認真凝視對方，專注在當下。',
-        life: '將能力擦亮，專注於能產生槓桿效應的事物。'
-      },
-      '肯定': {
-        career: '我希望我能夠肯定我的工作夥伴，在做的好的地方，能夠為團隊帶來更好的氛圍，我也會想要被肯定我的價值。',
-        relationship: '彼此都能肯定，以鼓勵的方式看見對方的好，也肯定自己的付出和愛。',
-        life: '自我肯定，並理解「好消息是你犯的每個錯誤都能教給你一些東西」。'
-      }
-    };
-
-    const USER_PROFILE_DEFAULTS = {
-      strengths: ['跨領域多能者', '傾向理性/重視邏輯', '深入研究/拆解問題', '快速適應變動', 'FAB動態管理'],
-      roles: ['開拓行動者 (重視影響力)', '危機解碼者 (安全感)', '流程結構師 (成就感)'],
-      philosophy: [
-        'Dream big start small. 錢是重要的象徵嗎？心底認同往前走。',
-        '把自己產品化：特定知識 + 槓桿力 + 獨特性 + 當責力。',
-        '人生四種運氣：盲目、拼命、準備、獨特性。',
-        '成功的關鍵在於不斷地思考並有效地應對挑戰 (決心 + 追求真相)。',
-        '創意擇優：坦陳想法、理性分歧、可信度加權決策。',
-        '痛苦 + 反省 = 進步。'
-      ],
-      fabExamples: []
-    };
-
-    const SYSTEM_INSTRUCTION_TEMPLATE = `
-你是一個精通「優勢思維」與「人生設計」的資深教練。
-使用者的核心價值觀是：{{VALUES}}。
-使用者的天賦優勢是：{{STRENGTHS}}。
-使用者在團隊中的角色通常是：{{ROLES}}。
-
-請基於以下的人生哲學與使用者進行對話與指導：
-1. **把自己產品化**：利用特定知識、槓桿力、獨特性與當責。
-2. **人生四種運氣**：特別關注由「獨特性」帶來的運氣。
-3. **原則 (Ray Dalio)**：擁抱現實，追求真相，通過極度開放與極度透明來做決策（創意擇優）。
-4. **FAB 技巧**：Feature (特質), Advantage (優勢), Benefit (價值) 來動態管理能力。
-
-當使用者詢問職涯、感情或人生選擇時，請務必：
-- 回歸到他們的 5 個核心價值觀來分析。
-- 提醒他們目前的優勢如何應用（或是如何避免劣勢）。
-- 引用上述的哲學概念（如「這是一個正和遊戲嗎？」、「這符合你的特定知識嗎？」）。
-- 保持理性、鼓勵且具備洞察力的語氣。
-`;
-
-    const JOURNAL_ANALYSIS_PROMPT = `
-你是一位擅長「每週覆盤」的人生策略師。請閱讀使用者本週的流水帳紀錄，並根據他們的「5大核心價值觀」與「人生哲學」生成一份結構化的 JSON 分析報告。
-
-使用者的核心價值觀與定義：
-{{VALUES_CONTEXT}}
-
-使用者本月正在進行的專案 (Projects)：
-{{PROJECTS_CONTEXT}}
-
-使用者本週紀錄：
-{{USER_CONTENT}}
-
-重要指示：
-1. 請務必回傳 **純 JSON 格式**，不要包含 Markdown 標記。
-2. **scores**: 針對 5 個核心價值觀進行評分 (0-100)，反映本週的實踐程度。
-3. **fab**: 從日記中提取這週最亮眼的一個「優勢運用實例」，轉換為 FAB 格式。
-   - category: **分類標籤**，請只選一個最合適的：[技術力, 領導力, 溝通力, 思維力, 執行力, 影響力]
-4. **project_updates**: (重要) 請分析日記內容是否提到了上述「進行的專案」。
-   - 如果使用者明確完成了某專案，建議狀態改為 "Done"。
-   - 如果遇到嚴重阻礙，建議狀態改為 "Blocked"。
-   - 如果開始進行待開始的項目，建議改為 "In Progress"。
-   - 若無相關提及則回傳空陣列。
-5. **new_strength_tags**: 如果發現新的潛力關鍵字，列在陣列中。
-
-JSON 格式範例：
-{
-  "scores": {
-    "成長": 85,
-    "平衡": 60,
-    "好奇": 90,
-    "專注": 75,
-    "肯定": 80
-  },
-  "summary": "一段溫暖且理性的 50 字本週總結。",
-  "fab": {
-    "feature": "撰寫自動化腳本處理報表",
-    "advantage": "結合程式能力與對業務流程的理解",
-    "benefit": "每週為團隊節省 3 小時工時，減少人為錯誤",
-    "category": "技術力",
-    "new_strength_tags": ["流程自動化"]
-  },
-  "action_items": ["下週的一個具體建議"],
-  "project_updates": [
-    {
-      "projectId": "12345",
-      "suggestedStatus": "Done",
-      "reasoning": "日記中提到已經完成了品牌識別的設計並交付。"
-    }
-  ]
-}
-`;
-
-    const CATEGORY_COLORS = {
-      '個人發展': 'bg-red-100 text-red-700',
-      '職涯規劃': 'bg-orange-100 text-orange-700',
-      '健康管理': 'bg-green-100 text-green-700',
-      '學習成長': 'bg-blue-100 text-blue-700',
-      '科技應用': 'bg-purple-100 text-purple-700',
-      '專業發展': 'bg-pink-100 text-pink-700',
-      '品牌經營': 'bg-indigo-100 text-indigo-700',
-    };
-
-    const STATUS_STYLES = {
-      'Not Started': 'bg-slate-100 text-slate-500',
-      'In Progress': 'bg-indigo-100 text-indigo-700',
-      'Done': 'bg-green-100 text-green-700',
-      'Blocked': 'bg-red-100 text-red-700',
-    };
-
-    // --- Helper Components (保留您的功能) ---
-
-    const DataSettingsModal = ({ isOpen, onClose, onImport, onExport, hasKey, onApiKeySave }) => {
-      const [key, setKey] = useState('');
-      const [showKeyInput, setShowKeyInput] = useState(!hasKey);
-
+    // --- Sub-Components ---
+    const SettingsModal = ({ isOpen, onClose, apiKey, onApiKeySave, onManualSync, isSyncing, lastSaved }) => {
+      const [key, setKey] = useState(apiKey);
       if (!isOpen) return null;
-
       return (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-xl font-bold text-slate-800 flex items-center">
-                <Settings className="mr-2 text-slate-600" /> 資料與設定
-              </h3>
-              <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-bold text-slate-800">設定</h3>
+              <button onClick={onClose} className="text-slate-400 text-2xl">&times;</button>
             </div>
-            
-            <div className="p-6 space-y-8">
-              <div>
-                <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">資料存取 (備份/還原)</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <button onClick={onExport} className="flex flex-col items-center justify-center p-4 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 transition-colors group">
-                    <Download className="w-8 h-8 text-indigo-600 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="font-bold text-indigo-900">匯出備份</span>
-                    <span className="text-xs text-indigo-600/70 mt-1">下載 .json 檔案</span>
-                  </button>
-
-                  <label className="flex flex-col items-center justify-center p-4 bg-amber-50 border border-amber-100 rounded-xl hover:bg-amber-100 transition-colors cursor-pointer group">
-                    <Upload className="w-8 h-8 text-amber-600 mb-2 group-hover:scale-110 transition-transform" />
-                    <span className="font-bold text-amber-900">匯入還原</span>
-                    <span className="text-xs text-amber-600/70 mt-1">讀取 .json 檔案</span>
-                    <input type="file" accept=".json" onChange={onImport} className="hidden" />
-                  </label>
-                </div>
-              </div>
-
-              <hr className="border-slate-100"/>
-
-              <div>
-                <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">AI 連線設定 (Gemini)</h4>
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  {hasKey && !showKeyInput ? (
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center text-green-600 font-bold text-sm">
-                        <CheckCircle size={16} className="mr-2" /> API Key 已設定
-                      </div>
-                      <button onClick={() => setShowKeyInput(true)} className="text-xs text-slate-500 underline hover:text-indigo-600">重設</button>
+            <div className="p-6 space-y-6">
+               <div>
+                 <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">雲端同步 (Google Sheets)</h4>
+                 <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col items-center">
+                    <div className="flex items-center mb-2 space-x-2">
+                       {isSyncing ? <RefreshCw className="animate-spin text-indigo-600"/> : <Cloud className="text-indigo-600"/>}
+                       <span className="font-bold text-indigo-900">{isSyncing ? "同步中..." : "已連線"}</span>
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                       <p className="text-xs text-slate-500">請輸入您的 Google Gemini API Key 以啟用 AI 教練功能。</p>
-                       <input 
-                          type="password" 
-                          value={key}
-                          onChange={(e) => setKey(e.target.value)}
-                          className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                          placeholder="AIzaSy..."
-                       />
-                       <div className="flex justify-end gap-2">
-                         {hasKey && <button onClick={() => setShowKeyInput(false)} className="text-xs text-slate-400 px-3 py-1">取消</button>}
-                         <button onClick={() => { onApiKeySave(key); setShowKeyInput(false); }} className="bg-slate-800 text-white text-xs px-4 py-2 rounded-lg hover:bg-slate-700">儲存 Key</button>
-                       </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    const ValueSelector = ({ selectedValues, onToggleValue }) => {
-      const maxSelection = 5;
-      const isMaxSelected = selectedValues.length >= maxSelection;
-
-      return (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h2 className="text-xl font-bold text-slate-800 mb-2">第一步：探索價值觀</h2>
-            <p className="text-slate-600 mb-4">
-              請從下方關鍵字中選擇最能代表你的 <span className="font-bold text-indigo-600">5 個核心價值觀</span>。
-            </p>
-            
-            <div className="flex flex-wrap gap-2 mb-6">
-              {selectedValues.map(val => (
-                <span key={val} className="px-3 py-1 bg-indigo-600 text-white rounded-full text-sm font-medium shadow-sm">
-                  {val}
-                </span>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-4 md:grid-cols-7 gap-2 md:gap-3">
-              {KEYWORD_GRID.flat().map((keyword, idx) => {
-                const isSelected = selectedValues.includes(keyword);
-                const isDisabled = !isSelected && isMaxSelected;
-
-                return (
-                  <button
-                    key={`${keyword}-${idx}`}
-                    onClick={() => onToggleValue(keyword)}
-                    disabled={isDisabled}
-                    className={`
-                      py-2 px-1 rounded-lg text-sm transition-all duration-200
-                      ${isSelected 
-                        ? 'bg-indigo-600 text-white shadow-md scale-105 font-bold' 
-                        : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'}
-                      ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-                    `}
-                  >
-                    {keyword}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    const ValueDefinitions = ({ selectedValues, definitions, onUpdateDefinition }) => {
-      if (selectedValues.length === 0) {
-        return <div className="text-center py-12 text-slate-500">請先至「價值探索」選擇您的核心價值觀。</div>;
-      }
-
-      return (
-        <div className="space-y-8">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h2 className="text-xl font-bold text-slate-800 mb-2">第二步：定義意義</h2>
-            <p className="text-slate-600">同樣的價值觀對每個人有不同的意義。請定義這些價值觀在「職涯」、「感情」與「人生」中對你的具體意涵。</p>
-          </div>
-
-          <div className="grid gap-8">
-            {selectedValues.map((val) => (
-              <div key={val} className="bg-white p-6 rounded-xl shadow-md border-l-4 border-indigo-500">
-                <h3 className="text-2xl font-bold text-slate-800 mb-6 flex items-center">
-                  <span className="bg-indigo-100 text-indigo-700 px-4 py-1 rounded-full text-lg mr-3">{val}</span>
-                  的定義
-                </h3>
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">職涯 (Career)</label>
-                    <textarea
-                      className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 bg-slate-50"
-                      rows={3}
-                      value={definitions[val]?.career || ''}
-                      onChange={(e) => onUpdateDefinition(val, 'career', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">感情 (Relationship)</label>
-                    <textarea
-                      className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-pink-500 bg-slate-50"
-                      rows={3}
-                      value={definitions[val]?.relationship || ''}
-                      onChange={(e) => onUpdateDefinition(val, 'relationship', e.target.value)}
-                    />
-                  </div>
-                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2 uppercase tracking-wide">自我與原則 (Self)</label>
-                    <textarea
-                      className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-emerald-500 bg-slate-50"
-                      rows={3}
-                      value={definitions[val]?.life || ''}
-                      onChange={(e) => onUpdateDefinition(val, 'life', e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    };
-
-    const CompassView = ({ selectedValues, userProfile, entries, subjectiveRatings, onUpdateSubjectiveRating }) => {
-      const [quoteIndex, setQuoteIndex] = useState(0);
-      
-      useEffect(() => {
-        if (userProfile.philosophy.length === 0) return;
-        const interval = setInterval(() => setQuoteIndex((prev) => (prev + 1) % userProfile.philosophy.length), 6000);
-        return () => clearInterval(interval);
-      }, [userProfile.philosophy.length]);
-
-      const currentYear = new Date().getFullYear();
-      
-      const calculatedStats = useMemo(() => {
-        const yearEntries = entries.filter(entry => {
-          const entryYear = new Date(entry.date).getFullYear();
-          return entryYear === currentYear && entry.parsedAnalysis?.scores;
-        });
-
-        const stats = {};
-        selectedValues.forEach(val => stats[val] = { sum: 0, count: 0 });
-
-        yearEntries.forEach(entry => {
-          if (entry.parsedAnalysis?.scores) {
-            Object.entries(entry.parsedAnalysis.scores).forEach(([key, score]) => {
-              if (stats[key]) {
-                stats[key].sum += score;
-                stats[key].count += 1;
-              }
-            });
-          }
-        });
-
-        const averages = {};
-        selectedValues.forEach(val => {
-          if (stats[val] && stats[val].count > 0) {
-            averages[val] = Math.round(stats[val].sum / stats[val].count);
-          } else {
-            averages[val] = 0;
-          }
-        });
-
-        return { averages, entryCount: yearEntries.length };
-      }, [entries, selectedValues, currentYear]);
-
-      const groupedFABs = useMemo(() => {
-        const groups = {};
-        const sortedEntries = [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        sortedEntries.forEach(entry => {
-          if (entry.parsedAnalysis?.fab) {
-            const fab = entry.parsedAnalysis.fab;
-            const category = fab.category || "未分類";
-            if (!groups[category]) groups[category] = [];
-            groups[category].push({ ...fab, date: entry.date });
-          }
-        });
-        return groups;
-      }, [entries]);
-
-      const chartData = selectedValues.map(val => ({
-        subject: val,
-        ideal: 100,
-        calculated: calculatedStats.averages[val],
-        subjective: subjectiveRatings[val],
-        fullMark: 100,
-      }));
-
-      return (
-        <div className="space-y-8">
-          <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white p-8 rounded-2xl shadow-xl relative overflow-hidden min-h-[200px] flex flex-col justify-between group">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -mr-16 -mt-16 transition-transform duration-1000 group-hover:scale-110"></div>
-            <div className="relative z-10">
-              <h2 className="text-3xl font-bold mb-2 tracking-tight">個人優勢羅盤 ({currentYear})</h2>
-              <p className="text-indigo-200 text-lg">Annual Value Snapshot & FAB Portfolio</p>
-            </div>
-            <div className="relative z-10 mt-6 max-w-3xl animate-float">
-               <div className="flex items-start space-x-3">
-                 <Quote className="text-indigo-400 opacity-50 flex-shrink-0 mt-1" size={24} />
-                 <p className="text-xl md:text-2xl font-light italic leading-relaxed text-indigo-100 font-serif">
-                   "{userProfile.philosophy[quoteIndex]}"
-                 </p>
+                    <p className="text-xs text-indigo-600/70 mb-3">{lastSaved ? `上次儲存: ${lastSaved}` : '尚未儲存'}</p>
+                    <button onClick={onManualSync} disabled={isSyncing} className="w-full py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+                      {isSyncing ? '同步中...' : '立即強制同步'}
+                    </button>
+                 </div>
+               </div>
+               <div>
+                 <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">AI 金鑰 (Gemini)</h4>
+                 <input type="password" value={key} onChange={(e) => setKey(e.target.value)} className="w-full p-2 border rounded-lg text-sm" placeholder="輸入 API Key..." />
+                 <div className="flex justify-end mt-2">
+                   <button onClick={() => { onApiKeySave(key); onClose(); }} className="bg-slate-800 text-white text-xs px-4 py-2 rounded-lg">儲存</button>
+                 </div>
                </div>
             </div>
           </div>
-
-          <div className="grid lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 space-y-8">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col items-center relative">
-                <div className="flex justify-between w-full items-center mb-4">
-                  <h3 className="text-lg font-bold text-slate-700">價值觀實踐快照</h3>
-                  <span className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 font-bold rounded-md">{currentYear} 年度統計</span>
-                </div>
-                <div className="w-full h-[400px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="75%" data={chartData}>
-                      <PolarGrid stroke="#e2e8f0" />
-                      <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 14, fontWeight: 600 }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                      <Radar name="理想狀態" dataKey="ideal" stroke="#cbd5e1" strokeDasharray="4 4" fill="transparent" />
-                      <Radar name="AI 覆盤平均" dataKey="calculated" stroke="#4f46e5" strokeWidth={3} fill="#6366f1" fillOpacity={0.6} />
-                      <Radar name="自我主觀" dataKey="subjective" stroke="#f59e0b" strokeWidth={2} fill="transparent" strokeOpacity={0.5} />
-                      <Legend />
-                      <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
-            <div className="lg:col-span-5 space-y-8">
-               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 min-h-[500px]">
-                <div className="flex items-center justify-between mb-6 border-b pb-3">
-                  <h3 className="text-lg font-bold text-slate-700 flex items-center">
-                    <Zap className="w-5 h-5 text-amber-500 mr-2" fill="currentColor" />
-                    FAB 動態優勢庫
-                  </h3>
-                </div>
-                <div className="space-y-6 h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                  {Object.entries(groupedFABs).map(([category, items]) => (
-                    <div key={category} className="space-y-3">
-                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center">
-                        <span className="w-2 h-2 bg-indigo-400 rounded-full mr-2"></span>
-                        {category} ({items.length})
-                      </h4>
-                      <div className="grid gap-3">
-                        {items.map((item, idx) => (
-                          <div key={idx} className="bg-slate-50 hover:bg-white p-4 rounded-xl border border-slate-200 transition-all hover:shadow-md">
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="text-xs text-slate-400 font-mono">{new Date(item.date).toLocaleDateString()}</span>
-                              <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">{item.feature}</span>
-                            </div>
-                            <div className="grid grid-cols-1 gap-2 text-sm">
-                              <div className="flex items-start"><span className="font-bold text-slate-400 w-6">A.</span><span>{item.advantage}</span></div>
-                              <div className="flex items-start"><span className="font-bold text-green-500 w-6">B.</span><span className="font-medium">{item.benefit}</span></div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
-    const AICoach = ({ selectedValues, definitions, userProfile, apiKey }) => {
-      const [input, setInput] = useState('');
-      const [messages, setMessages] = useState([
-        { role: 'model', text: '你好！我是你的優勢思維教練。我已經了解你的五大核心價值觀與天賦優勢。你現在想聊什麼？', timestamp: Date.now() }
-      ]);
-      const [isLoading, setIsLoading] = useState(false);
-      const messagesEndRef = useRef(null);
-
-      useEffect(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
-
-      const handleSendMessage = async () => {
-        if (!input.trim() || isLoading || !apiKey) return;
-        const userMsg = { role: 'user', text: input, timestamp: Date.now() };
-        setMessages(prev => [...prev, userMsg]);
-        setInput('');
-        setIsLoading(true);
-
-        try {
-          let systemInstruction = SYSTEM_INSTRUCTION_TEMPLATE
-            .replace('{{VALUES}}', selectedValues.join(', '))
-            .replace('{{STRENGTHS}}', userProfile.strengths.join(', '))
-            .replace('{{ROLES}}', userProfile.roles.join(', '));
-
-          let valuesContext = "使用者的價值觀詳細定義：\n";
-          selectedValues.forEach(val => {
-            const def = definitions[val];
-            if (def) valuesContext += `- ${val}: ${def.career} / ${def.relationship} / ${def.life}\n`;
-          });
-          systemInstruction += `\n${valuesContext}`;
-          
-          // 建立完整的 prompt
-          const fullPrompt = `${systemInstruction}\n\n對話歷史:\n${messages.map(m => `${m.role}: ${m.text}`).join('\n')}\n\nuser: ${userMsg.text}`;
-
-          // 使用 Fetch 替代 Google SDK
-          const replyText = await callGeminiAPI(apiKey, fullPrompt);
-          
-          setMessages(prev => [...prev, { role: 'model', text: replyText, timestamp: Date.now() }]);
-        } catch (error) {
-          console.error(error);
-          setMessages(prev => [...prev, { role: 'model', text: `連線錯誤: ${error.message}`, timestamp: Date.now() }]);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-
-      return (
-        <div className="flex flex-col h-[600px] bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
-             {messages.map((msg, idx) => (
-               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                 <div className={`max-w-[80%] p-4 rounded-2xl whitespace-pre-wrap ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-100'}`}>{msg.text}</div>
-               </div>
-             ))}
-             <div ref={messagesEndRef} />
-           </div>
-           <div className="p-4 bg-white border-t border-slate-100 flex relative">
-             <textarea 
-                value={input} onChange={(e) => setInput(e.target.value)} 
-                className="w-full pr-12 pl-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 resize-none outline-none" rows={2}
-                placeholder="輸入問題..."
-             />
-             <button onClick={handleSendMessage} disabled={isLoading} className="absolute right-6 top-5 text-indigo-600"><ArrowRight/></button>
-           </div>
         </div>
       );
     };
@@ -680,143 +138,85 @@ JSON 格式範例：
       const [inputContent, setInputContent] = useState('');
       const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-      const activeProjects = useMemo(() => {
-        const currentMonth = new Date().toISOString().slice(0, 7);
-        return projects.filter(p => (p.status === 'In Progress' || p.status === 'Not Started') && p.monthKey === currentMonth);
-      }, [projects]);
-
-      const startNewEntry = () => {
-        setCurrentEntry({ id: Date.now().toString(), date: new Date().toISOString(), rawContent: '', tags: [] });
-        setInputContent('');
-        setIsEditing(true);
-      };
+      const activeProjects = useMemo(() => projects.filter(p => p.status !== 'Done'), [projects]);
 
       const handleAnalyze = async () => {
-        if (!inputContent.trim() || !apiKey) return;
+        if (!inputContent.trim() || !apiKey) return alert("請先輸入內容並設定 API Key");
         setIsAnalyzing(true);
         try {
-           let valuesContext = "";
-           selectedValues.forEach(val => {
-             const def = definitions[val];
-             if (def) valuesContext += `- **${val}**: ${def.career} ${def.relationship} ${def.life}\n`;
-           });
+           let valuesContext = selectedValues.map(v => `- ${v}: ${definitions[v]?.life || ''}`).join('\n');
+           let projectsContext = activeProjects.map(p => `- ${p.title} (${p.status})`).join('\n');
+           const prompt = `你是一位人生教練。請分析以下週記，並回傳 JSON。
+           價值觀：${valuesContext}
+           專案：${projectsContext}
+           週記：${inputContent}
            
-           let projectsContext = activeProjects.length > 0 
-             ? activeProjects.map(p => `- ID:${p.id} | 專案名稱:${p.title} | 狀態:${p.status}`).join('\n')
-             : "無進行中專案";
-
-           const prompt = JOURNAL_ANALYSIS_PROMPT
-             .replace('{{VALUES_CONTEXT}}', valuesContext)
-             .replace('{{PROJECTS_CONTEXT}}', projectsContext)
-             .replace('{{USER_CONTENT}}', inputContent);
-
-           // 使用 Fetch 替代 Google SDK
+           格式：{ "scores": {"價值觀A": 80...}, "summary": "50字摘要", "fab": {"category":"能力類別", "feature":"", "advantage":"", "benefit":""}, "action_items": ["建議"], "project_updates": [{"projectId":"", "suggestedStatus":"Done", "reasoning":""}] }`;
+           
            const responseText = await callGeminiAPI(apiKey, prompt, true);
-
            const parsedResult = JSON.parse(responseText.replace(/```json|```/g, '').trim());
-           setCurrentEntry(prev => ({ ...prev, aiAnalysisRaw: responseText, parsedAnalysis: parsedResult }));
-        } catch (error) {
-          console.error(error);
-          alert("分析失敗");
-        } finally {
-          setIsAnalyzing(false);
-        }
+           setCurrentEntry(prev => ({ ...prev, parsedAnalysis: parsedResult }));
+        } catch (error) { console.error(error); alert("分析失敗"); } finally { setIsAnalyzing(false); }
       };
 
       const saveEntry = () => {
-        const updated = { ...currentEntry, rawContent: inputContent };
+        const updated = { ...currentEntry, rawContent: inputContent, date: currentEntry.date || new Date().toISOString() };
         const exists = entries.find(e => e.id === updated.id);
         onUpdateEntries(exists ? entries.map(e => e.id === updated.id ? updated : e) : [updated, ...entries]);
         setIsEditing(false);
       };
 
-      const handleApplyProjectUpdate = (update) => {
-         const updatedProjects = projects.map(p => 
-           p.id === update.projectId 
-             ? { ...p, status: update.suggestedStatus, isCompleted: update.suggestedStatus === 'Done' } 
-             : p
-         );
-         onUpdateProjects(updatedProjects);
-      };
-
       if (isEditing) {
         return (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-[calc(100vh-200px)]">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <button onClick={() => setIsEditing(false)} className="text-slate-500">← 返回</button>
-              <button onClick={saveEntry} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center"><Save size={18} className="mr-2"/>儲存</button>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col h-[calc(100vh-140px)]">
+            <div className="p-3 border-b flex justify-between items-center bg-slate-50 rounded-t-xl">
+              <button onClick={() => setIsEditing(false)} className="text-slate-500 px-2">← 返回</button>
+              <button onClick={saveEntry} className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg flex items-center text-sm"><Save size={16} className="mr-1"/>儲存</button>
             </div>
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              <div className="flex-1 p-6 flex flex-col border-r border-slate-100 h-1/2 lg:h-auto overflow-y-auto">
-                {activeProjects.length > 0 && (
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    {activeProjects.map(p => (
-                      <button key={p.id} onClick={() => setInputContent(prev => prev + ` [專案] ${p.title}: `)} className="text-xs bg-slate-100 px-2 py-1 rounded-full flex items-center hover:bg-indigo-50"><Target size={12} className="mr-1"/>{p.title}</button>
-                    ))}
-                  </div>
-                )}
-                <textarea value={inputContent} onChange={(e) => setInputContent(e.target.value)} className="flex-1 w-full p-4 bg-slate-50 border border-slate-200 rounded-xl resize-none outline-none" placeholder="本週紀錄..." />
-                <div className="mt-4 flex justify-end">
-                  <button onClick={handleAnalyze} disabled={isAnalyzing} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-5 py-2.5 rounded-xl flex items-center shadow-md">{isAnalyzing ? 'AI 思考中...' : <><Sparkles size={18} className="mr-2"/>AI 覆盤</>}</button>
-                </div>
+              <div className="flex-1 p-4 flex flex-col border-r border-slate-100 h-1/2 lg:h-auto overflow-y-auto">
+                <textarea value={inputContent} onChange={(e) => setInputContent(e.target.value)} className="flex-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl resize-none outline-none text-base" placeholder="本週發生了什麼..." />
+                <div className="mt-3 flex justify-end"><button onClick={handleAnalyze} disabled={isAnalyzing} className="bg-amber-500 text-white px-4 py-2 rounded-lg flex items-center text-sm shadow">{isAnalyzing ? '分析中...' : <><Sparkles size={16} className="mr-1"/>AI 覆盤</>}</button></div>
               </div>
-              <div className="flex-1 p-6 bg-slate-50/50 overflow-y-auto custom-scrollbar h-1/2 lg:h-auto">
+              <div className="flex-1 p-4 bg-slate-50/50 overflow-y-auto custom-scrollbar h-1/2 lg:h-auto text-sm">
                 {currentEntry?.parsedAnalysis ? (
-                  <div className="space-y-6">
-                    {currentEntry.parsedAnalysis.project_updates?.length > 0 && (
-                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200">
-                          <h4 className="font-bold text-indigo-900 mb-2 flex items-center"><Target size={18} className="mr-2"/>專案更新建議</h4>
-                          {currentEntry.parsedAnalysis.project_updates.map(u => (
-                            <div key={u.projectId} className="flex justify-between items-center mt-2 bg-white p-2 rounded">
-                              <span className="text-sm">{u.reasoning}</span>
-                              <button onClick={() => handleApplyProjectUpdate(u)} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded">改為 {u.suggestedStatus}</button>
-                            </div>
-                          ))}
-                        </div>
-                    )}
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><p className="text-slate-700">{currentEntry.parsedAnalysis.summary}</p></div>
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-5 gap-2">
-                          {Object.entries(currentEntry.parsedAnalysis.scores).map(([k, v]) => (
-                            <div key={k} className="text-center"><div className="text-xs text-slate-500">{k}</div><div className="font-bold">{v}</div></div>
-                          ))}
+                  <div className="space-y-4">
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm"><p className="text-slate-700">{currentEntry.parsedAnalysis.summary}</p></div>
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm grid grid-cols-5 gap-1">
+                      {Object.entries(currentEntry.parsedAnalysis.scores || {}).map(([k, v]) => (<div key={k} className="text-center"><div className="text-[10px] text-slate-500">{k}</div><div className="font-bold text-indigo-600">{v}</div></div>))}
                     </div>
                     {currentEntry.parsedAnalysis.fab && (
-                      <div className="bg-white p-4 rounded-xl border-l-4 border-amber-400">
-                          <h4 className="font-bold text-slate-800 mb-2 flex items-center"><Zap size={18} className="mr-2 text-amber-500"/>FAB: {currentEntry.parsedAnalysis.fab.category}</h4>
-                          <div className="text-sm space-y-1">
-                            <div><span className="font-bold text-slate-400">F:</span> {currentEntry.parsedAnalysis.fab.feature}</div>
-                            <div><span className="font-bold text-indigo-400">A:</span> {currentEntry.parsedAnalysis.fab.advantage}</div>
-                            <div><span className="font-bold text-green-500">B:</span> {currentEntry.parsedAnalysis.fab.benefit}</div>
-                          </div>
+                      <div className="bg-white p-3 rounded-xl border-l-4 border-amber-400 text-xs space-y-1">
+                          <div className="font-bold text-amber-600 mb-1">FAB 優勢分析</div>
+                          <div><b className="text-slate-400">F:</b> {currentEntry.parsedAnalysis.fab.feature}</div>
+                          <div><b className="text-indigo-400">A:</b> {currentEntry.parsedAnalysis.fab.advantage}</div>
+                          <div><b className="text-green-500">B:</b> {currentEntry.parsedAnalysis.fab.benefit}</div>
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-slate-400">請輸入內容並點擊分析</div>
-                )}
+                ) : <div className="text-center text-slate-400 py-10">尚無 AI 分析結果</div>}
               </div>
             </div>
           </div>
         );
       }
-
       return (
-        <div className="space-y-6">
-           <div className="flex justify-between items-end">
-              <h2 className="text-2xl font-bold text-slate-800">每週覆盤</h2>
-              <button onClick={startNewEntry} className="bg-indigo-600 text-white px-5 py-3 rounded-xl flex items-center shadow-lg"><Plus size={20} className="mr-2"/>寫週記</button>
+        <div className="space-y-4">
+           <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-slate-800">每週覆盤</h2>
+              <button onClick={()=>{setCurrentEntry({id:Date.now().toString(), rawContent:''}); setInputContent(''); setIsEditing(true);}} className="bg-indigo-600 text-white px-4 py-2 rounded-xl flex items-center shadow text-sm"><Plus size={18} className="mr-1"/>寫週記</button>
            </div>
-           <div className="grid gap-4">
+           <div className="space-y-3 pb-20">
              {entries.map(e => (
-               <div key={e.id} onClick={() => { setCurrentEntry(e); setInputContent(e.rawContent); setIsEditing(true); }} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer flex justify-between items-center">
-                 <div className="flex items-center space-x-4">
-                   <div className="bg-slate-100 p-3 rounded-lg"><Calendar size={24} className="text-slate-500"/></div>
+               <div key={e.id} onClick={() => { setCurrentEntry(e); setInputContent(e.rawContent); setIsEditing(true); }} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center cursor-pointer">
+                 <div className="flex items-center space-x-3">
+                   <div className="bg-slate-100 p-2 rounded-lg"><Calendar size={20} className="text-slate-500"/></div>
                    <div>
-                     <div className="font-bold text-slate-800">{new Date(e.date).toLocaleDateString()}</div>
-                     <div className="text-slate-500 text-sm truncate w-48">{e.parsedAnalysis?.summary || "無摘要"}</div>
+                     <div className="font-bold text-slate-800 text-sm">{new Date(e.date || parseInt(e.id)).toLocaleDateString()}</div>
+                     <div className="text-slate-500 text-xs truncate w-40">{e.parsedAnalysis?.summary || "無摘要"}</div>
                    </div>
                  </div>
-                 <ChevronRight size={20} className="text-slate-300"/>
+                 <ChevronRight size={18} className="text-slate-300"/>
                </div>
              ))}
            </div>
@@ -825,237 +225,176 @@ JSON 格式範例：
     };
 
     const ProjectTracker = ({ projects, onUpdateProjects }) => {
-      const [currentDate, setCurrentDate] = useState(new Date());
+      const [newItem, setNewItem] = useState({ title: '', category: '個人發展', kpi: '' });
       const [isAdding, setIsAdding] = useState(false);
-      const [newItem, setNewItem] = useState({ title: '', category: '個人發展', status: 'Not Started', kpi: '' });
-
-      const currentMonthKey = useMemo(() => {
-        const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-        return `${currentDate.getFullYear()}-${month}`;
-      }, [currentDate]);
-
-      const filteredProjects = useMemo(() => projects.filter(p => p.monthKey === currentMonthKey), [projects, currentMonthKey]);
-      
-      const progressStats = useMemo(() => {
-          if (filteredProjects.length === 0) return 0;
-          return Math.round((filteredProjects.filter(p => p.isCompleted).length / filteredProjects.length) * 100);
-      }, [filteredProjects]);
-
-      const handleAddItem = () => {
-          if (!newItem.title) return;
-          const proj = {
-            id: Date.now().toString(),
-            ...newItem,
-            startDate: new Date().toISOString().split('T')[0],
-            isCompleted: false,
-            monthKey: currentMonthKey
-          };
-          onUpdateProjects([...projects, proj]);
-          setIsAdding(false);
-          setNewItem({ title: '', category: '個人發展', status: 'Not Started', kpi: '' });
-      };
-
-      const toggleCompletion = (id) => {
+      const toggleProject = (id) => {
         onUpdateProjects(projects.map(p => p.id === id ? { ...p, isCompleted: !p.isCompleted, status: !p.isCompleted ? 'Done' : 'In Progress' } : p));
       };
-
+      const addProject = () => {
+        if(!newItem.title) return;
+        onUpdateProjects([...projects, { ...newItem, id: Date.now().toString(), isCompleted: false, monthKey: new Date().toISOString().slice(0,7), status: 'Not Started' }]);
+        setIsAdding(false); setNewItem({ title: '', category: '個人發展', kpi: '' });
+      };
       return (
-        <div className="space-y-8">
-           <div className="flex justify-between items-center">
-              <div><h2 className="text-2xl font-bold text-slate-800 flex items-center"><Target className="mr-2 text-indigo-600"/>專案追蹤</h2></div>
-              <div className="flex items-center bg-white rounded-xl border border-slate-200 p-1">
-                 <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2"><ChevronLeft size={20}/></button>
-                 <div className="px-4 font-mono font-bold text-lg">{currentMonthKey}</div>
-                 <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2"><ChevronRight size={20}/></button>
-              </div>
-           </div>
-           <div className="bg-white p-6 rounded-xl border border-slate-100">
-              <div className="flex justify-between items-end mb-2"><span className="text-sm font-bold text-slate-500">完成度</span><span className="text-3xl font-bold text-indigo-600">{progressStats}%</span></div>
-              <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all" style={{ width: `${progressStats}%` }}/></div>
-           </div>
+        <div className="space-y-6 pb-20">
+           <h2 className="text-xl font-bold text-slate-800 flex items-center"><Target className="mr-2 text-indigo-600"/>專案追蹤</h2>
            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <div className="grid grid-cols-12 gap-4 p-4 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
-                 <div className="col-span-5">任務</div><div className="col-span-3">類別</div><div className="col-span-3">KPI</div><div className="col-span-1">完成</div>
-              </div>
               <div className="divide-y divide-slate-100">
-                 {filteredProjects.map(p => (
-                   <div key={p.id} className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-slate-50/50">
-                      <div className="col-span-5 flex items-center space-x-3">
-                         <button onClick={() => onUpdateProjects(projects.filter(prj => prj.id !== p.id))} className="text-slate-300 hover:text-red-400"><Trash2 size={14}/></button>
-                         <span className={`font-medium ${p.isCompleted ? 'line-through text-slate-400' : 'text-slate-700'}`}>{p.title}</span>
+                 {projects.map(p => (
+                   <div key={p.id} className="p-4 flex items-center justify-between">
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                         <button onClick={() => onUpdateProjects(projects.filter(x => x.id !== p.id))} className="text-slate-300"><Trash2 size={14}/></button>
+                         <div>
+                           <div className={`font-medium text-sm ${p.isCompleted ? 'line-through text-slate-400' : 'text-slate-700'}`}>{p.title}</div>
+                           <div className="text-xs text-slate-500 flex gap-2 mt-1"><span className={CATEGORY_COLORS[p.category] + " px-1 rounded"}>{p.category}</span> <span>{p.kpi}</span></div>
+                         </div>
                       </div>
-                      <div className="col-span-3"><span className={`text-xs px-2 py-1 rounded ${CATEGORY_COLORS[p.category]}`}>{p.category}</span></div>
-                      <div className="col-span-3 text-sm text-slate-600 truncate">{p.kpi}</div>
-                      <div className="col-span-1 flex justify-center"><button onClick={() => toggleCompletion(p.id)} className={p.isCompleted ? "text-indigo-500" : "text-slate-300"}>{p.isCompleted ? <CheckCircle size={22} fill="currentColor" className="text-white"/> : <Circle size={22}/>}</button></div>
+                      <button onClick={() => toggleProject(p.id)} className={p.isCompleted ? "text-indigo-500" : "text-slate-300"}>{p.isCompleted ? <CheckCircle size={24}/> : <Circle size={24}/>}</button>
                    </div>
                  ))}
                  {isAdding ? (
-                   <div className="grid grid-cols-12 gap-4 p-4 bg-indigo-50/30 border-l-4 border-indigo-500">
-                      <div className="col-span-5"><input autoFocus className="w-full p-1 border rounded" placeholder="名稱" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})}/></div>
-                      <div className="col-span-3"><select className="w-full p-1 border rounded" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{Object.keys(CATEGORY_COLORS).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
-                      <div className="col-span-3"><input className="w-full p-1 border rounded" placeholder="KPI" value={newItem.kpi} onChange={e => setNewItem({...newItem, kpi: e.target.value})}/></div>
-                      <div className="col-span-1 flex gap-2"><button onClick={handleAddItem} className="text-green-600 text-xs">V</button><button onClick={()=>setIsAdding(false)} className="text-slate-400 text-xs">X</button></div>
+                   <div className="p-4 bg-indigo-50 border-t border-indigo-100 space-y-3">
+                      <input className="w-full p-2 border rounded text-sm" placeholder="任務名稱" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})}/>
+                      <div className="flex gap-2">
+                        <select className="p-2 border rounded text-sm flex-1" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>{Object.keys(CATEGORY_COLORS).map(c=><option key={c} value={c}>{c}</option>)}</select>
+                        <input className="p-2 border rounded text-sm flex-1" placeholder="KPI" value={newItem.kpi} onChange={e => setNewItem({...newItem, kpi: e.target.value})}/>
+                      </div>
+                      <div className="flex justify-end gap-2"><button onClick={() => setIsAdding(false)} className="px-3 py-1 text-slate-500 text-sm">取消</button><button onClick={addProject} className="px-3 py-1 bg-indigo-600 text-white rounded text-sm">新增</button></div>
                    </div>
-                 ) : (
-                   <div onClick={() => setIsAdding(true)} className="p-4 text-slate-400 hover:bg-slate-50 cursor-pointer flex items-center text-sm"><Plus size={16} className="mr-2"/>新增任務</div>
-                 )}
+                 ) : <button onClick={() => setIsAdding(true)} className="w-full p-4 text-slate-400 flex items-center justify-center text-sm hover:bg-slate-50"><Plus size={16} className="mr-1"/>新增任務</button>}
               </div>
            </div>
         </div>
       );
     };
 
+    // --- Main App ---
     const App = () => {
-      const [activeTab, setActiveTab] = useState(AppTab.COMPASS);
+      const [activeTab, setActiveTab] = useState(AppTab.JOURNAL);
       const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
-      
-      // 資料與設定 Modal
       const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+      const [isSyncing, setIsSyncing] = useState(false);
+      const [lastSaved, setLastSaved] = useState(null);
+      const [isLoaded, setIsLoaded] = useState(false);
 
-      // 核心資料 State
+      // Data States
       const [selectedValues, setSelectedValues] = useState(INITIAL_SELECTED_VALUES);
       const [definitions, setDefinitions] = useState(DEFAULT_DEFINITIONS);
       const [userProfile, setUserProfile] = useState(USER_PROFILE_DEFAULTS);
-      const [entries, setEntries] = useState(() => JSON.parse(localStorage.getItem('life_compass_journals') || '[]'));
-      const [projects, setProjects] = useState(() => JSON.parse(localStorage.getItem('life_compass_projects') || '[]'));
-      const [subjectiveRatings, setSubjectiveRatings] = useState(() => {
-         const initial = {};
-         INITIAL_SELECTED_VALUES.forEach(v => initial[v] = 50);
-         return initial;
-      });
+      const [entries, setEntries] = useState([]);
+      const [projects, setProjects] = useState([]);
+      const [subjectiveRatings, setSubjectiveRatings] = useState({});
 
-      // 自動存檔
-      useEffect(() => localStorage.setItem('life_compass_journals', JSON.stringify(entries)), [entries]);
-      useEffect(() => localStorage.setItem('life_compass_projects', JSON.stringify(projects)), [projects]);
-      useEffect(() => { if(apiKey) localStorage.setItem('gemini_api_key', apiKey); }, [apiKey]);
+      // 1. 初始化：從雲端讀取資料
+      useEffect(() => {
+        const loadData = async () => {
+          setIsSyncing(true);
+          try {
+            const res = await fetch(GAS_API_URL);
+            const data = await res.json();
+            if (data && Object.keys(data).length > 0) {
+              if (data.entries) setEntries(data.entries);
+              if (data.projects) setProjects(data.projects);
+              if (data.definitions) setDefinitions(data.definitions);
+              if (data.userProfile) setUserProfile(data.userProfile);
+              if (data.selectedValues) setSelectedValues(data.selectedValues);
+              if (data.subjectiveRatings) setSubjectiveRatings(data.subjectiveRatings);
+              console.log("Cloud data loaded");
+            } else {
+               // Fallback to local storage if cloud is empty (first run)
+               const localEntries = JSON.parse(localStorage.getItem('life_compass_journals') || '[]');
+               if(localEntries.length > 0) setEntries(localEntries);
+            }
+          } catch (error) {
+            console.error("Load failed:", error);
+            alert("無法讀取雲端資料，將使用離線模式");
+          } finally {
+            setIsSyncing(false);
+            setIsLoaded(true);
+          }
+        };
+        loadData();
+      }, []);
+
+      // 2. 自動儲存：當資料變更時，延遲 3 秒上傳
+      useEffect(() => {
+        if (!isLoaded) return;
+        
+        const saveData = async () => {
+           setIsSyncing(true);
+           const payload = { selectedValues, definitions, userProfile, entries, projects, subjectiveRatings };
+           try {
+             await fetch(GAS_API_URL, { method: 'POST', body: JSON.stringify(payload) });
+             const time = new Date().toLocaleTimeString();
+             setLastSaved(time);
+             localStorage.setItem('life_compass_journals', JSON.stringify(entries)); // Keep local backup
+           } catch (e) { console.error("Save failed", e); }
+           finally { setIsSyncing(false); }
+        };
+
+        const timer = setTimeout(saveData, 3000); // 3秒 Debounce
+        return () => clearTimeout(timer);
+      }, [entries, projects, definitions, userProfile, subjectiveRatings, isLoaded]);
 
       const handleToggleValue = (val) => {
          if (selectedValues.includes(val)) setSelectedValues(prev => prev.filter(v => v !== val));
-         else if (selectedValues.length < 5) {
-            setSelectedValues(prev => [...prev, val]);
-            if (!definitions[val]) setDefinitions(prev => ({...prev, [val]: {career:'', relationship:'', life:''}}));
-         }
-      };
-
-      // 匯出功能
-      const handleExportData = () => {
-        const data = {
-          version: 1,
-          createdAt: new Date().toISOString(),
-          selectedValues,
-          definitions,
-          userProfile,
-          entries,
-          projects,
-          subjectiveRatings
-        };
-        
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `life-compass-backup-${new Date().toISOString().slice(0,10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      };
-
-      // 匯入功能
-      const handleImportData = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const data = JSON.parse(event.target.result);
-            
-            // 簡單的資料驗證與還原
-            if (confirm(`確定要匯入備份檔嗎？\n這將會覆蓋目前的 ${data.entries?.length || 0} 篇週記與 ${data.projects?.length || 0} 個專案。`)) {
-              if (data.selectedValues) setSelectedValues(data.selectedValues);
-              if (data.definitions) setDefinitions(data.definitions);
-              if (data.userProfile) setUserProfile(data.userProfile);
-              if (data.entries) setEntries(data.entries);
-              if (data.projects) setProjects(data.projects);
-              if (data.subjectiveRatings) setSubjectiveRatings(data.subjectiveRatings);
-              
-              alert('資料還原成功！');
-              setIsSettingsOpen(false);
-            }
-          } catch (err) {
-            console.error(err);
-            alert('匯入失敗：檔案格式錯誤');
-          }
-        };
-        reader.readAsText(file);
+         else if (selectedValues.length < 5) setSelectedValues(prev => [...prev, val]);
       };
 
       const renderContent = () => {
         switch (activeTab) {
-          case AppTab.SELECTOR: return <ValueSelector selectedValues={selectedValues} onToggleValue={handleToggleValue} />;
-          case AppTab.DEFINITION: return <ValueDefinitions selectedValues={selectedValues} definitions={definitions} onUpdateDefinition={(v,f,t) => setDefinitions(p=>({...p, [v]:{...p[v],[f]:t}}))} />;
-          case AppTab.COMPASS: return <CompassView selectedValues={selectedValues} definitions={definitions} userProfile={userProfile} entries={entries} subjectiveRatings={subjectiveRatings} onUpdateSubjectiveRating={(v,r)=>setSubjectiveRatings(p=>({...p,[v]:r}))} />;
-          case AppTab.COACH: return <AICoach selectedValues={selectedValues} definitions={definitions} userProfile={userProfile} apiKey={apiKey} />;
-          case AppTab.JOURNAL: return <JournalView selectedValues={selectedValues} definitions={definitions} userProfile={userProfile} entries={entries} projects={projects} onUpdateEntries={setEntries} onAddStrengths={(s)=>setUserProfile(p=>({...p,strengths:[...new Set([...p.strengths,...s])]}))} onUpdateProjects={setProjects} apiKey={apiKey} />;
+          case AppTab.JOURNAL: return <JournalView selectedValues={selectedValues} definitions={definitions} userProfile={userProfile} entries={entries} projects={projects} onUpdateEntries={setEntries} onUpdateProjects={setProjects} apiKey={apiKey} />;
           case AppTab.PROJECTS: return <ProjectTracker projects={projects} onUpdateProjects={setProjects} />;
-          default: return null;
+          case AppTab.COMPASS: return (
+             <div className="space-y-6">
+               <div className="bg-indigo-900 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+                  <div className="relative z-10"><h2 className="text-2xl font-bold">優勢羅盤</h2><p className="opacity-70 text-sm mt-1">{userProfile.philosophy[0]}</p></div>
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-10 rounded-full -mr-10 -mt-10"></div>
+               </div>
+               <div className="bg-white p-4 rounded-xl shadow-sm h-[300px]">
+                 <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={selectedValues.map(v=>({subject:v, A:100, B:Math.random()*100}))}><PolarGrid stroke="#e2e8f0"/><PolarAngleAxis dataKey="subject"/><Radar name="Ideal" dataKey="A" stroke="#cbd5e1" fill="transparent"/><Radar name="Actual" dataKey="B" stroke="#4f46e5" fill="#6366f1" fillOpacity={0.5}/></RadarChart>
+                 </ResponsiveContainer>
+               </div>
+             </div>
+          );
+          default: return <div className="p-10 text-center text-slate-400">功能開發中...</div>;
         }
       };
 
-      return (
-        <div className="min-h-screen bg-slate-50 text-slate-900 pb-12 font-sans">
-          {/* 資料設定 Modal */}
-          <DataSettingsModal 
-            isOpen={isSettingsOpen} 
-            onClose={() => setIsSettingsOpen(false)} 
-            onImport={handleImportData}
-            onExport={handleExportData}
-            hasKey={!!apiKey}
-            onApiKeySave={setApiKey}
-          />
+      if (!isLoaded) return <div className="h-screen flex flex-col items-center justify-center text-indigo-600"><RefreshCw className="animate-spin mb-2"/><p>正在連線到雲端大腦...</p></div>;
 
-          {/* 頁首 Header */}
-          <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm backdrop-blur-sm bg-white/90">
-            <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-indigo-600 rounded-lg text-white shadow-indigo-200 shadow-lg"><Compass size={24} /></div>
-                <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600 hidden sm:block">Life Compass</h1>
-                <h1 className="text-xl font-bold text-indigo-600 sm:hidden">Compass</h1>
-              </div>
-              
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="flex items-center text-slate-500 hover:text-indigo-600 px-3 py-2 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <Settings size={20} className="mr-2" />
-                <span className="text-sm font-medium hidden sm:inline">設定與資料</span>
-              </button>
+      return (
+        <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl relative overflow-hidden">
+          <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} apiKey={apiKey} onApiKeySave={setApiKey} isSyncing={isSyncing} lastSaved={lastSaved} onManualSync={() => setEntries([...entries])} />
+
+          <header className="bg-white/90 backdrop-blur-sm border-b border-slate-200 px-4 h-14 flex items-center justify-between sticky top-0 z-30">
+            <div className="flex items-center space-x-2 font-bold text-slate-800"><Compass className="text-indigo-600"/><span>Life Compass</span></div>
+            <div className="flex items-center gap-3">
+               <div className="flex items-center text-xs text-slate-400">
+                  {isSyncing ? <RefreshCw size={14} className="animate-spin text-indigo-500"/> : <Cloud size={14} className="text-green-500"/>}
+               </div>
+               <button onClick={() => setIsSettingsOpen(true)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500"><Settings size={20}/></button>
             </div>
           </header>
 
-          <main className="max-w-5xl mx-auto px-4 py-8">
-            {/* 導航列 */}
-            <div className="flex space-x-2 bg-slate-200/70 p-1.5 rounded-2xl mb-8 overflow-x-auto shadow-inner scrollbar-hide">
+          <main className="p-4 pb-24">{renderContent()}</main>
+
+          <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe max-w-md mx-auto z-40">
+            <div className="flex justify-around p-2">
                {[
-                 {id: AppTab.SELECTOR, icon: Grid, label: '價值'},
-                 {id: AppTab.DEFINITION, icon: Edit3, label: '定義'},
-                 {id: AppTab.COMPASS, icon: Compass, label: '羅盤'},
-                 {id: AppTab.PROJECTS, icon: Target, label: '專案'},
                  {id: AppTab.JOURNAL, icon: BookOpen, label: '覆盤'},
-                 {id: AppTab.COACH, icon: MessageCircle, label: '智囊'}
+                 {id: AppTab.PROJECTS, icon: Target, label: '專案'},
+                 {id: AppTab.COMPASS, icon: Compass, label: '羅盤'},
+                 {id: AppTab.SELECTOR, icon: Grid, label: '價值'}
                ].map(tab => (
-                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 min-w-[80px] py-2.5 text-sm font-bold rounded-xl flex items-center justify-center transition-all duration-200 ${activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm scale-100' : 'text-slate-500 hover:bg-white/50 hover:text-slate-700'}`}>
-                    <tab.icon size={16} className="mr-1.5 mb-0.5"/>{tab.label}
+                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center p-2 rounded-xl transition-all ${activeTab === tab.id ? 'text-indigo-600 scale-110' : 'text-slate-400'}`}>
+                    <tab.icon size={24} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+                    <span className="text-[10px] font-bold mt-1">{tab.label}</span>
                  </button>
                ))}
             </div>
-            
-            {/* 主要內容區 */}
-            <div className="animate-fadeIn min-h-[500px]">
-              {renderContent()}
-            </div>
-          </main>
+          </nav>
         </div>
       );
     };
