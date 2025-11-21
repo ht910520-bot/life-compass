@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Life Compass v2.4 (Stable)</title>
+  <title>Life Compass v2.5 (Sync Control)</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -29,14 +29,12 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    // 請確認這是你的 Google Apps Script 網址
+    // Google Apps Script 網址
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx4S4xt6GsA_Ffdayxg6xHC3wfiKJGdHO8I9hXciCLD27_wCAXgo5TCrYb4a5qSn-K8mQ/exec";
 
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
     const { createRoot } = ReactDOM;
-    const { 
-      ResponsiveContainer, ComposedChart, Line, Area, Bar, XAxis, YAxis, Tooltip, AreaChart 
-    } = window.Recharts || {};
+    const { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, Bar, ComposedChart, Line } = window.Recharts || {};
 
     // --- Icons ---
     const IconBase = ({ children, size = 20, className = "", ...props }) => (
@@ -57,69 +55,30 @@
       Plus: (p) => <IconBase {...p}><path d="M5 12h14"/><path d="M12 5v14"/></IconBase>,
       Link: (p) => <IconBase {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></IconBase>,
       Star: (p) => <IconBase {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></IconBase>,
-      Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>
+      Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
+      Upload: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></IconBase>,
+      CloudUpload: (p) => <IconBase {...p}><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19h-2c-2.485 0-4.5-2.015-4.5-4.5S2.015 10 4.5 10c.174 0 .343.02.51.054C5.83 6.934 8.668 5 11.5 5c4.006 0 7.454 2.816 8.275 6.655 2.484.205 4.225 2.216 4.225 4.845C24 19.015 21.985 21 19.5 21h-2z"/></IconBase>
     };
-    const { Compass, BookOpen, Target, TrendingUp, Zap, Save, Sparkles, Trash2, Calendar, ChevronRight, Settings, Cloud, RefreshCw, Plus, Link, Star, Download } = Icons;
+    const { Compass, BookOpen, Target, TrendingUp, Zap, Save, Sparkles, Trash2, Calendar, ChevronRight, Settings, Cloud, RefreshCw, Plus, Link, Star, Download, Upload, CloudUpload } = Icons;
 
-    // --- 2. Data ---
     const AppTab = { JOURNAL: 'journal', PROJECTS: 'projects', FINANCE: 'finance', COMPASS: 'compass', FAB: 'fab' };
     
-    // Asset Data (2020-2025/10)
+    // 預設資料 (備援用，如果本地和雲端都全空才會用到)
     const INITIAL_RAW_ASSET_DATA = `
     Dec-20 56 26 46% 30 0 0% 56.0 54% 47.6 6.20 6.2 6.20
     Mar-21 77 41 53% 35 0 0% 77.0 45% 65.4 3.30 3.3 9.50
-    Apr-21 87 44 51% 36 0 0% 87.0 41% 70.2 3.80 0.50 10.00
     Jul-21 101.4 38.7 38% 62.7 0 0% 101.4 62% 98.1 4.10 0.30 10.30
-    Oct-21 112.2 45.5 41% 66.4 0 0% 112.2 59% 115.3 4.80 0.70 11.00
     Dec-21 115.3 59.3 51% 56 0 0% 115.3 49% 125.2 5.10 0.30 11.30
-    Feb-22 124 68.5 55% 56 0 0% 124.0 45% 142.6 0.30 0.30 11.60
-    Mar-22 128 56.6 44% 72 0 0% 128.0 56% 147.9 (2.80) (3.10) 8.50
-    Apr-22 138 62.2 45% 76.6 0 0% 138.0 56% 164.9 (5.60) (2.80) 5.70
-    May-22 135.3 53 49.1 39% 86.2 0 0% 135.3 64% 173.1 (9.72) (4.12) 1.58
     Jun-22 135.6 56.2 51.2 41% 84.4 0 0% 135.6 62% 178.5 (12.02) (2.30) (0.72)
-    Jul-22 140.2 50.8 50.2 36% 90 0 0% 140.2 64% 183.9 (10.72) 1.30 0.58
-    Aug-22 145.4 63.5 63.6 44% 81.8 0 0% 145.4 56% 189.2 (9.85) 0.87 1.45
-    Sep-22 146.9 67.2 61.8 42% 85.1 0 0% 146.9 58% 197.3 (15.35) (5.50) (4.05)
-    Oct-22 146.4 68.5 60.4 41% 86 0 0% 146.4 59% 202.6 (17.95) (2.60) (6.65)
-    Nov-22 153.0 70.4 68.5 45% 84.5 0 0% 153.0 55% 207.4 (12.31) 5.64 (1.01)
     Dec-22 151.0 87.9 79.9 53% 71.1 0 0% 151.0 47% 212.7 (18.31) (6.00) (7.01)
-    Jan-23 162.3 83 77.1 48% 85.2 0 0% 162.3 52% 223.8 4.00 4.00 (3.01)
-    Feb-23 175.7 89.5 89.3 51% 86.5 0 0% 175.7 49% 234.8 9.91 5.91 2.90
-    Mar-23 178 96.7 94.2 53% 83.8 0 0% 178.0 47% 240.1 7.22 (2.69) 0.21
-    Apr-23 286.5 103.2 105.2 37% 181.3 100 35% 0% 186.5 63% 246.7 11.92 4.70 4.91
-    May-23 294.2 119.6 117.4 40% 174.6 98.4 33% 0% 195.8 59% 259.5 11.70 (0.22) 4.69
     Jun-23 317 130.6 151.7 48% 165.3 96.9 31% 0% 220.1 52% 267.6 31.30 19.60 24.29
-    Jul-23 321.5 140.2 165.2 51% 156.3 95.4 30% 0% 226.1 49% 272.9 35.20 3.90 28.19
-    Aug-23 315.9 145.8 161.9 51% 154 93.7 30% 0% 222.2 49% 278.4 26.30 (8.90) 19.29
-    Sep-23 321.9 152.1 171.7 53% 150.2 92.2 29% 0% 229.7 47% 283.8 29.80 3.50 22.79
-    Oct-23 321.1 155.4 169.7 53% 151.4 90.4 28% 0% 230.7 47% 292.0 24.50 (5.30) 17.49
-    Nov-23 328.6 150.6 169.9 52% 158.7 89.1 27% 0% 239.5 48% 297.6 31.50 7.00 24.49
     Dec-23 337.4 165.6 193.0 57% 144.4 87.5 26% 0% 249.9 43% 303.1 39.60 8.10 32.59
-    Jan-24 335.7 169.1 197.0 59% 138.7 85.9 26% 0% 249.8 41% 308.7 0.30 0.30 32.89
-    Feb-24 364.8 181.9 222.9 61% 141.7 84.1 23% 0% 280.7 39% 320.1 13.40 13.10 45.99
-    Mar-24 442.7 196.5 249.7 56% 193 154.7 35% 0% 288.0 44% 325.5 25.70 12.30 58.29
-    Apr-24 418.9 200.5 253.6 61% 165.3 127.3 30% 0% 291.6 39% 331.2 27.67 1.97 60.26
-    May-24 441.2 220.6 286.5 65% 154.7 125.8 29% 0% 315.4 35% 337 47.59 19.92 80.18
     Jun-24 483.5 233.2 326.2 67% 157.3 124.3 26% 0% 359.2 33% 356.6 74.59 27.00 107.18
-    Jul-24 511.1 241.4 362 71% 48.1 122.7 24% 101 20% 388.4 9% 362 102.21 27.62 134.80
-    Aug-24 482.7 250.2 333.7 69% 48 121.2 25% 101 21% 361.5 10% 367.3 66.87 (35.34) 99.46
-    Sep-24 478.4 255 330.7 69% 46.7 119.7 25% 101 21% 358.7 10% 370.7 59.07 (7.80) 91.66
-    Oct-24 513 259.1 366.2 71% 45.8 118.2 23% 101 20% 394.8 9% 377.3 91.51 32.44 124.10
-    Nov-24 515.1 264.4 363.5 71% 50.6 116.7 23% 101 20% 398.4 10% 384.4 83.51 (8.00) 116.10
     Dec-24 526.6 241 338.1 64% 73.5 115.1 22% 115 22% 411.5 14% 392 88.70 5.19 121.29
-    Jan-25 556 253.4 367.7 66% 73.3 113.6 20% 115 21% 442.4 13% 405.8 17.20 17.20 138.49
-    Feb-25 542.2 253 355.6 66% 71.6 112 21% 115 21% 430.2 13% 412.1 4.10 (13.10) 125.39
-    Mar-25 508.8 255.2 320.8 63% 73 110.5 22% 115 23% 398.3 14% 416.8 (34.10) (38.20) 87.19
-    Apr-25 444.7 150.2 149.4 34% 180.3 108.9 24% 115 26% 335.8 41% 416.8 (91.70) (57.60) 29.59
-    May-25 463 180.4 206.9 45% 141.1 107.4 23% 115 25% 355.6 30% 416.8 (63.90) 27.80 57.39
-    Jun-25 469.7 186.4 218.1 46% 91.6 105.8 23% 160 34% 363.9 20% 416.8 (58.70) 5.20 62.59
-    Jul-25 488.8 191.9 243.1 50% 72.7 104.2 21% 173 35% 384.6 15% 416.8 (38.20) 20.50 83.09
-    Aug-25 537.8 194.9 257.9 48% 91.9 130 24% 188 35% 407.8 17% 420 (27.40) 10.80 93.89
-    Sep-25 555.7 197.3 259.1 47% 95.6 128.5 23% 201 36% 427.2 17% 425.7 (9.62) 17.78 111.67
     Oct-25 587.1 205.2 291.7 50% 94.4 127.1 22% 201 34% 460.0 16% 431.3 15.18 24.80 136.47
     `;
 
-    // XIRR 計算
+    // XIRR Utility
     function calculateXIRR_Newton(transactions, guess = 0.1) {
       if (transactions.length < 2) return 0;
       const d0 = transactions[0].date;
@@ -148,6 +107,7 @@
            const parts = dateStr.split('-');
            const monthMap = { 'Jan':'01','Feb':'02','Mar':'03','Apr':'04','May':'05','Jun':'06','Jul':'07','Aug':'08','Sep':'09','Oct':'10','Nov':'11','Dec':'12' };
            const date = `20${parts[1]}-${monthMap[parts[0]] || '01'}-01`;
+           
            const percIndices = [];
            tokens.forEach((t, idx) => { if (t.includes('%')) percIndices.push(idx); });
            let total = parseFloat(tokens[1].replace(/,/g, ''));
@@ -155,9 +115,11 @@
            let lastPercIdx = percIndices[percIndices.length - 1];
            let netAssetsToken = tokens[lastPercIdx - 1];
            let netAssets = parseFloat(netAssetsToken.replace(/,/g, ''));
+           
            let firstPercIdx = percIndices[0];
            let invBook = 0;
            if (firstPercIdx > 3) invBook = parseFloat(tokens[3].replace(/,/g, ''));
+           
            let pool = [];
            for (let i = firstPercIdx + 1; i < lastPercIdx - 1; i++) {
                let t = tokens[i];
@@ -172,13 +134,14 @@
            if (!invBook) invBook = total - cash - house;
            let calculatedLoan = total - netAssets;
            if (Math.abs(calculatedLoan - loan) > 5) loan = Math.max(0, calculatedLoan);
+           
            return { rawDate: dateStr, date, total, principal, netAssets, loan, house, cash, invBook };
        }).filter(x => x !== null).sort((a,b) => new Date(a.date) - new Date(b.date));
     }
 
     // --- Components ---
 
-    const FinanceView = ({ data, onAddData, onResetData }) => {
+    const FinanceView = ({ data, onAddData }) => {
       const [newData, setNewData] = useState({ date: new Date().toISOString().slice(0,7), principal: '', inv: '', cash: '', house: '', loan: '' });
       const [showForm, setShowForm] = useState(false);
 
@@ -189,6 +152,7 @@
           const prevData = data.find(d => d.date.startsWith(`${parseInt(year)-1}-12`)) || data.find(d => d.date.startsWith(`${parseInt(year)-1}-`));
           const currData = data.filter(d => d.date.startsWith(`${year}-`));
           if (!prevData || currData.length === 0) return null;
+          
           let trans = [{ amount: -prevData.netAssets, date: new Date(`${year}-01-01`) }];
           let prevPrin = prevData.principal;
           currData.forEach(r => {
@@ -218,15 +182,11 @@
         <div className="space-y-6 pb-20">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-black text-slate-900 flex items-center"><TrendingUp className="mr-2 text-indigo-600"/>資產戰情室</h2>
-            <div className="flex gap-2">
-                <button onClick={onResetData} className="bg-slate-200 text-slate-600 px-3 py-2 rounded-lg text-xs font-bold" title="強制匯入程式碼中的最新數據">
-                    <Download size={14}/>
-                </button>
-                <button onClick={() => setShowForm(!showForm)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">
-                    {showForm ? "取消" : "+ 紀錄"}
-                </button>
-            </div>
+            <button onClick={() => setShowForm(!showForm)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">
+                {showForm ? "取消" : "+ 紀錄"}
+            </button>
           </div>
+
           <div className="grid grid-cols-3 gap-2">
             {annualXIRR.slice(-6).map(i => (
               <div key={i.year} className="bg-white p-3 rounded-xl border border-slate-100 text-center shadow-sm">
@@ -235,6 +195,7 @@
               </div>
             ))}
           </div>
+
           {showForm && (
             <div className="bg-white p-4 rounded-xl border-l-4 border-indigo-500 shadow-lg space-y-4 animate-pulse-subtle">
                <div className="grid grid-cols-2 gap-3">
@@ -250,6 +211,7 @@
                <button onClick={handleSubmit} className="w-full bg-slate-800 text-white py-2 rounded font-bold">確認更新</button>
             </div>
           )}
+
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm h-72">
              <div className="text-sm font-bold text-slate-700 mb-2">淨資產堆疊圖</div>
              <ResponsiveContainer width="100%" height="100%">
@@ -267,6 +229,7 @@
                 </AreaChart>
              </ResponsiveContainer>
           </div>
+
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm h-64">
              <div className="text-sm font-bold text-slate-700 mb-2">資產配置與負債</div>
              <ResponsiveContainer width="100%" height="100%">
@@ -438,28 +401,22 @@
 
     const ProjectView = ({ projects, onUpdateProjects }) => {
        const [newP, setNewP] = useState('');
-       
        const addP = () => { 
            if(!newP) return; 
            onUpdateProjects([...projects, { id: Date.now().toString(), title: newP, status: 'In Progress' }]); 
            setNewP(''); 
        };
-
        const deleteProject = (id) => {
-           if(confirm("確定要刪除這個專案嗎？")) {
-               onUpdateProjects(projects.filter(p => p.id !== id));
-           }
+           if(confirm("確定要刪除這個專案嗎？")) onUpdateProjects(projects.filter(p => p.id !== id));
        };
 
        return (
           <div className="space-y-6 pb-20">
              <h2 className="text-2xl font-black text-slate-900">專案管理</h2>
-             
              <div className="flex gap-2">
                 <input value={newP} onChange={e=>setNewP(e.target.value)} className="flex-1 p-3 border rounded-xl" placeholder="新專案名稱..."/>
                 <button onClick={addP} className="bg-slate-800 text-white px-4 rounded-xl font-bold">+</button>
              </div>
-
              <div className="space-y-3">
                 {projects.map(p => (
                    <div key={p.id} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center">
@@ -481,64 +438,150 @@
     };
 
     const App = () => {
-      const [activeTab, setActiveTab] = useState(AppTab.FINANCE); // 預設先看資產
+      const [activeTab, setActiveTab] = useState(AppTab.FINANCE); 
       const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || '');
       const [isSyncing, setIsSyncing] = useState(false);
       const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+      const [syncStatus, setSyncStatus] = useState('');
       
       const [entries, setEntries] = useState([]);
       const [projects, setProjects] = useState([]);
       const [financeData, setFinanceData] = useState([]);
       const [fabList, setFabList] = useState([]); 
 
+      // 1. 初始化讀取 (修正：優先讀取 Local Storage，防止雲端舊資料覆蓋)
       useEffect(() => {
         const loadData = async () => {
           setIsSyncing(true);
+          setSyncStatus('載入中...');
           try {
-             const localEntries = JSON.parse(localStorage.getItem('lc_entries') || '[]');
-             if(localEntries.length > 0) setEntries(localEntries);
-             const res = await fetch(GAS_API_URL);
-             const cloudData = await res.json();
-             if (cloudData && Object.keys(cloudData).length > 0) {
-                if(cloudData.entries) setEntries(cloudData.entries);
-                if(cloudData.projects) setProjects(cloudData.projects);
-                // 優先讀取雲端，若無則載入預設
-                if(cloudData.financeData && cloudData.financeData.length > 0) setFinanceData(cloudData.financeData);
-                else setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
-                if(cloudData.fabList) setFabList(cloudData.fabList);
+             // 優先從本地讀取 (Source of Truth for single user)
+             const localData = JSON.parse(localStorage.getItem('lc_data') || '{}');
+             let hasLocalData = false;
+
+             if(localData.entries) { setEntries(localData.entries); hasLocalData = true; }
+             if(localData.projects) { setProjects(localData.projects); hasLocalData = true; }
+             if(localData.fabList) { setFabList(localData.fabList); hasLocalData = true; }
+             if(localData.financeData && localData.financeData.length > 0) {
+                 setFinanceData(localData.financeData);
+                 hasLocalData = true;
+             } else {
+                 // 只有在本地完全沒資料時，才載入預設
+                 setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
              }
-          } catch (e) { console.error(e); setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA)); }
-          finally { setIsSyncing(false); }
+
+             // 嘗試從雲端讀取 (主要用於跨裝置同步，邏輯：若雲端有資料且比本地多，則詢問或合併，這裡先採簡單策略)
+             // 在單人使用情境下，通常是希望讀取到最新。若本地已有資料，我們假設它是最新的編輯。
+             // 若本地無資料 (新裝置)，則完全依賴雲端。
+             if (!hasLocalData) {
+                 const res = await fetch(GAS_API_URL);
+                 const cloudData = await res.json();
+                 if (cloudData && Object.keys(cloudData).length > 0) {
+                    if(cloudData.entries) setEntries(cloudData.entries);
+                    if(cloudData.projects) setProjects(cloudData.projects);
+                    if(cloudData.financeData) setFinanceData(cloudData.financeData);
+                    if(cloudData.fabList) setFabList(cloudData.fabList);
+                    setSyncStatus('已從雲端載入');
+                 } else {
+                    setSyncStatus('雲端無資料');
+                 }
+             } else {
+                 setSyncStatus('已載入本地資料');
+             }
+          } catch (e) { 
+              console.error(e); 
+              setSyncStatus('離線模式');
+          } finally { 
+              setIsSyncing(false); 
+          }
         };
         loadData();
       }, []);
 
+      // 2. 自動儲存 (Debounce)
       useEffect(() => {
+         if (entries.length===0 && projects.length===0 && financeData.length===0) return;
+
          const timer = setTimeout(async () => {
             setIsSyncing(true);
+            setSyncStatus('儲存中...');
             const payload = { entries, projects, financeData, fabList };
+            
+            // 1. 先存本地 (保命)
+            localStorage.setItem('lc_data', JSON.stringify(payload));
+
+            // 2. 再推雲端
             try {
                await fetch(GAS_API_URL, { method: 'POST', body: JSON.stringify(payload) });
-               localStorage.setItem('lc_entries', JSON.stringify(entries));
-            } catch(e) { console.error(e); }
-            finally { setIsSyncing(false); }
+               setSyncStatus(`已同步 ${new Date().toLocaleTimeString()}`);
+            } catch(e) { 
+                console.error(e); 
+                setSyncStatus('⚠️ 雲端同步失敗 (已存本地)');
+            } finally { 
+                setIsSyncing(false); 
+            }
          }, 3000);
          return () => clearTimeout(timer);
       }, [entries, projects, financeData, fabList]);
 
-      // 強制重置資產數據
-      const handleResetFinance = () => {
-          if(confirm("確定要將資產數據重置為程式碼中的預設值 (含 2025 資料) 嗎？這會覆蓋目前的修改。")) {
-              setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
-              alert("已重置，請等待自動同步完成。");
+      // 3. 手動強制同步
+      const handleForceSync = async () => {
+          if(!confirm("確定要強制將目前的資料覆寫到雲端嗎？")) return;
+          setIsSyncing(true);
+          setSyncStatus('強制上傳中...');
+          const payload = { entries, projects, financeData, fabList };
+          try {
+              await fetch(GAS_API_URL, { method: 'POST', body: JSON.stringify(payload) });
+              setSyncStatus(`強制同步完成 ${new Date().toLocaleTimeString()}`);
+              alert("雲端資料已更新！");
+          } catch(e) {
+              alert("上傳失敗，請檢查網路");
+              setSyncStatus('上傳失敗');
+          } finally {
+              setIsSyncing(false);
           }
+      };
+
+      // 4. 匯出 JSON
+      const handleExport = () => {
+          const data = { entries, projects, financeData, fabList, timestamp: new Date().toISOString() };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `life_compass_backup_${new Date().toISOString().slice(0,10)}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+      };
+
+      // 5. 匯入 JSON
+      const handleImport = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+              try {
+                  const data = JSON.parse(event.target.result);
+                  if(confirm(`確定要還原備份嗎？這將覆蓋現有資料。\n(包含 ${data.financeData?.length || 0} 筆資產紀錄)`)) {
+                      if(data.entries) setEntries(data.entries);
+                      if(data.projects) setProjects(data.projects);
+                      if(data.financeData) setFinanceData(data.financeData);
+                      if(data.fabList) setFabList(data.fabList);
+                      alert("還原成功！將自動同步至雲端。");
+                  }
+              } catch(err) {
+                  alert("檔案格式錯誤");
+              }
+          };
+          reader.readAsText(file);
       };
 
       const renderContent = () => {
          switch(activeTab) {
             case AppTab.JOURNAL: return <JournalView entries={entries} projects={projects} onUpdateEntries={setEntries} apiKey={apiKey} fabList={fabList} onAddFab={(fab) => setFabList([fab, ...fabList])} />;
             case AppTab.PROJECTS: return <ProjectView projects={projects} onUpdateProjects={setProjects} />;
-            case AppTab.FINANCE: return <FinanceView data={financeData} onAddData={(d) => setFinanceData([...financeData, d].sort((a,b)=>new Date(a.date)-new Date(b.date)))} onResetData={handleResetFinance} />;
+            case AppTab.FINANCE: return <FinanceView data={financeData} onAddData={(d) => setFinanceData([...financeData, d].sort((a,b)=>new Date(a.date)-new Date(b.date)))} />;
             case AppTab.FAB: return <FABView fabList={fabList} onUpdateFab={setFabList} />;
             default: return <div className="p-10 text-center text-slate-400">功能開發中</div>;
          }
@@ -548,22 +591,47 @@
         <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl relative overflow-hidden flex flex-col">
            {isSettingsOpen && (
               <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                 <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4">
-                    <h3 className="font-bold text-lg">設定</h3>
-                    <div>
-                       <label className="block text-sm font-bold text-slate-500 mb-1">Gemini API Key</label>
-                       <input type="password" value={apiKey} onChange={e=>{setApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value)}} className="w-full p-2 border rounded"/>
+                 <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h3 className="font-bold text-lg">設定與資料</h3>
+                        <button onClick={()=>setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">✕</button>
                     </div>
-                    <button onClick={()=>setIsSettingsOpen(false)} className="w-full bg-slate-800 text-white py-2 rounded font-bold">關閉</button>
+                    
+                    <div className="space-y-3">
+                        <h4 className="text-xs font-bold text-slate-400 uppercase">資料管理</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={handleExport} className="flex flex-col items-center justify-center p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-indigo-50 hover:border-indigo-200 transition text-slate-600 hover:text-indigo-600">
+                                <Download size={24} className="mb-1"/>
+                                <span className="text-xs font-bold">下載備份</span>
+                            </button>
+                            <label className="flex flex-col items-center justify-center p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-amber-50 hover:border-amber-200 transition text-slate-600 hover:text-amber-600 cursor-pointer">
+                                <Upload size={24} className="mb-1"/>
+                                <span className="text-xs font-bold">匯入還原</span>
+                                <input type="file" accept=".json" className="hidden" onChange={handleImport}/>
+                            </label>
+                        </div>
+                        <button onClick={handleForceSync} className="w-full flex items-center justify-center p-3 bg-indigo-600 text-white rounded-xl font-bold shadow-md active:scale-95 transition">
+                            <CloudUpload size={18} className="mr-2"/> 強制雲端同步
+                        </button>
+                        <p className="text-[10px] text-slate-400 text-center">若跨裝置資料不同步，請按此強制更新雲端。</p>
+                    </div>
+
+                    <div className="space-y-2 border-t border-slate-100 pt-4">
+                       <h4 className="text-xs font-bold text-slate-400 uppercase">API 設定</h4>
+                       <input type="password" placeholder="Gemini API Key" value={apiKey} onChange={e=>{setApiKey(e.target.value); localStorage.setItem('gemini_api_key', e.target.value)}} className="w-full p-2 border rounded text-sm"/>
+                    </div>
                  </div>
               </div>
            )}
 
            <header className="bg-white/90 backdrop-blur px-4 h-14 flex items-center justify-between border-b border-slate-200 sticky top-0 z-30">
-              <div className="font-black text-lg text-slate-800 flex items-center"><Compass className="mr-2 text-indigo-600"/> LifeOS 2.4</div>
+              <div className="font-black text-lg text-slate-800 flex items-center"><Compass className="mr-2 text-indigo-600"/> LifeOS 2.5</div>
               <div className="flex items-center gap-3">
-                 {isSyncing ? <RefreshCw size={16} className="animate-spin text-indigo-500"/> : <Cloud size={16} className="text-green-500"/>}
-                 <button onClick={()=>setIsSettingsOpen(true)}><Settings size={20} className="text-slate-400"/></button>
+                 <div className="text-[10px] font-medium text-slate-400 flex items-center">
+                    {isSyncing ? <RefreshCw size={12} className="animate-spin mr-1 text-indigo-500"/> : <Cloud size={12} className={`mr-1 ${syncStatus.includes('失敗') ? 'text-red-500' : 'text-green-500'}`}/>}
+                    {syncStatus || '就緒'}
+                 </div>
+                 <button onClick={()=>setIsSettingsOpen(true)}><Settings size={20} className="text-slate-400 hover:text-indigo-600 transition"/></button>
               </div>
            </header>
 
