@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Life Compass v2.6 (SyncMaster)</title>
+  <title>Life Compass v2.7 (Live Sync)</title>
   
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -32,7 +32,7 @@
     // Google Apps Script 網址
     const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx4S4xt6GsA_Ffdayxg6xHC3wfiKJGdHO8I9hXciCLD27_wCAXgo5TCrYb4a5qSn-K8mQ/exec";
 
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
     const { createRoot } = ReactDOM;
     const { AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, Bar, ComposedChart, Line } = window.Recharts || {};
 
@@ -58,9 +58,10 @@
       Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
       Upload: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></IconBase>,
       CloudUpload: (p) => <IconBase {...p}><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19h-2c-2.485 0-4.5-2.015-4.5-4.5S2.015 10 4.5 10c.174 0 .343.02.51.054C5.83 6.934 8.668 5 11.5 5c4.006 0 7.454 2.816 8.275 6.655 2.484.205 4.225 2.216 4.225 4.845C24 19.015 21.985 21 19.5 21h-2z"/></IconBase>,
+      CloudDownload: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></IconBase>,
       Clock: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></IconBase>
     };
-    const { Compass, BookOpen, Target, TrendingUp, Zap, Save, Sparkles, Trash2, Calendar, ChevronRight, Settings, Cloud, RefreshCw, Plus, Link, Star, Download, Upload, CloudUpload, Clock } = Icons;
+    const { Compass, BookOpen, Target, TrendingUp, Zap, Save, Sparkles, Trash2, Calendar, ChevronRight, Settings, Cloud, RefreshCw, Plus, Link, Star, Download, Upload, CloudUpload, CloudDownload, Clock } = Icons;
 
     const AppTab = { JOURNAL: 'journal', PROJECTS: 'projects', FINANCE: 'finance', COMPASS: 'compass', FAB: 'fab' };
     
@@ -108,6 +109,7 @@
            const parts = dateStr.split('-');
            const monthMap = { 'Jan':'01','Feb':'02','Mar':'03','Apr':'04','May':'05','Jun':'06','Jul':'07','Aug':'08','Sep':'09','Oct':'10','Nov':'11','Dec':'12' };
            const date = `20${parts[1]}-${monthMap[parts[0]] || '01'}-01`;
+           
            const percIndices = [];
            tokens.forEach((t, idx) => { if (t.includes('%')) percIndices.push(idx); });
            let total = parseFloat(tokens[1].replace(/,/g, ''));
@@ -130,6 +132,7 @@
            let netAssets = parseFloat(netAssetsToken.replace(/,/g, ''));
            let calculatedLoan = total - netAssets;
            if (Math.abs(calculatedLoan - loan) > 5) loan = Math.max(0, calculatedLoan);
+           
            return { rawDate: dateStr, date, total, principal, netAssets, loan, house, cash, invBook };
        }).filter(x => x !== null).sort((a,b) => new Date(a.date) - new Date(b.date));
     }
@@ -422,122 +425,136 @@
       const [isSyncing, setIsSyncing] = useState(false);
       const [isSettingsOpen, setIsSettingsOpen] = useState(false);
       const [syncStatus, setSyncStatus] = useState('');
+      const [isInitialized, setIsInitialized] = useState(false); // 新增鎖
       
-      // 全域資料狀態
       const [entries, setEntries] = useState([]);
       const [projects, setProjects] = useState([]);
       const [financeData, setFinanceData] = useState([]);
       const [fabList, setFabList] = useState([]);
-      const [dataTimestamp, setDataTimestamp] = useState(0); // 用於比較版本
+      const [dataTimestamp, setDataTimestamp] = useState(0);
 
-      // 1. 初始化：智慧同步 (本地優先 + 版本比較)
-      useEffect(() => {
-        const loadData = async () => {
+      // 1. 核心讀取函數 (抽離出來以便重複呼叫)
+      const syncData = async (forcePull = false) => {
           setIsSyncing(true);
-          setSyncStatus('載入中...');
+          setSyncStatus('檢查同步...');
           try {
-             // A. 先讀取本地
              const localRaw = localStorage.getItem('lc_data');
              const localData = localRaw ? JSON.parse(localRaw) : {};
              const localTS = localData.dataTimestamp || 0;
-             
-             // 暫存到 State
-             if(localData.entries) setEntries(localData.entries);
-             if(localData.projects) setProjects(localData.projects);
-             if(localData.fabList) setFabList(localData.fabList);
-             if(localData.financeData && localData.financeData.length > 0) setFinanceData(localData.financeData);
-             else if(!localRaw) setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
-             setDataTimestamp(localTS);
 
-             // B. 讀取雲端並比較版本
+             // 先載入本地 (如果還沒載入過)
+             if (!isInitialized) {
+                 if(localData.entries) setEntries(localData.entries);
+                 if(localData.projects) setProjects(localData.projects);
+                 if(localData.fabList) setFabList(localData.fabList);
+                 if(localData.financeData && localData.financeData.length > 0) setFinanceData(localData.financeData);
+                 else if(!localRaw) setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
+                 setDataTimestamp(localTS);
+             }
+
+             // 讀取雲端
              const res = await fetch(GAS_API_URL);
              const cloudData = await res.json();
              const cloudTS = cloudData.dataTimestamp || 0;
 
-             if (cloudTS > localTS) {
-                 // 雲端比較新，更新本地
+             // 比較版本：如果雲端比較新，或是強制拉取
+             if (cloudTS > localTS || forcePull) {
                  if(cloudData.entries) setEntries(cloudData.entries);
                  if(cloudData.projects) setProjects(cloudData.projects);
                  if(cloudData.financeData) setFinanceData(cloudData.financeData);
                  if(cloudData.fabList) setFabList(cloudData.fabList);
                  setDataTimestamp(cloudTS);
-                 // 更新 localStorage
                  localStorage.setItem('lc_data', JSON.stringify(cloudData));
-                 setSyncStatus('已更新至雲端最新版');
+                 setSyncStatus('已更新至雲端版');
+                 alert(forcePull ? "已從雲端下載最新資料！" : "發現雲端新資料，已自動同步。");
              } else {
-                 setSyncStatus('本地資料已是最新');
+                 setSyncStatus('資料已是最新');
              }
           } catch (e) {
               console.error(e);
-              setSyncStatus('離線模式 (使用本地資料)');
+              setSyncStatus('離線模式');
           } finally {
               setIsSyncing(false);
+              setIsInitialized(true); // 解鎖自動存檔
           }
+      };
+
+      // 2. 初始化 & 喚醒監聽
+      useEffect(() => {
+        syncData(); // 第一次執行
+
+        // 監聽：當回到此頁面時，自動檢查雲端
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                console.log("App active, checking cloud...");
+                syncData();
+            }
         };
-        loadData();
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
       }, []);
 
-      // 2. 自動儲存 (Debounce 3s)
+      // 3. 自動儲存 (被 isInitialized 保護)
       useEffect(() => {
+         if (!isInitialized) return; // 沒確認過雲端之前，不准存檔！
          if (entries.length===0 && projects.length===0 && financeData.length===0) return;
 
          const timer = setTimeout(async () => {
-            const newTS = Date.now(); // 更新時間戳記
+            const newTS = Date.now();
             const payload = { entries, projects, financeData, fabList, dataTimestamp: newTS };
             
-            // 1. 存本地
             localStorage.setItem('lc_data', JSON.stringify(payload));
             setDataTimestamp(newTS);
 
-            // 2. 推雲端
             setIsSyncing(true);
-            setSyncStatus('同步中...');
+            setSyncStatus('上傳中...');
             try {
                await fetch(GAS_API_URL, { method: 'POST', body: JSON.stringify(payload) });
                setSyncStatus(`已同步 ${new Date().toLocaleTimeString()}`);
             } catch(e) {
-                setSyncStatus('⚠️ 同步失敗 (資料已存本地)');
+                setSyncStatus('⚠️ 上傳失敗 (已存本地)');
             } finally {
                 setIsSyncing(false);
             }
          }, 3000);
          return () => clearTimeout(timer);
-      }, [entries, projects, financeData, fabList]);
+      }, [entries, projects, financeData, fabList, isInitialized]);
 
-      // 手動強制同步 (覆蓋雲端)
-      const handleForceSync = async () => {
-          if(!confirm("確定要強制將目前的資料覆寫到雲端嗎？\n(這將以這台裝置的資料為準)")) return;
+      // 手動：強制上傳 (Push)
+      const handleForcePush = async () => {
+          if(!confirm("確定要用「目前這台裝置」的資料覆蓋雲端嗎？")) return;
           setIsSyncing(true);
           setSyncStatus('強制上傳中...');
           const newTS = Date.now();
           const payload = { entries, projects, financeData, fabList, dataTimestamp: newTS };
           try {
-              localStorage.setItem('lc_data', JSON.stringify(payload)); // Update local first
+              localStorage.setItem('lc_data', JSON.stringify(payload));
               await fetch(GAS_API_URL, { method: 'POST', body: JSON.stringify(payload) });
-              setSyncStatus(`強制同步完成 ${new Date().toLocaleTimeString()}`);
-              alert("雲端資料已更新！");
+              setSyncStatus(`上傳成功 ${new Date().toLocaleTimeString()}`);
+              alert("雲端已更新為本機資料！");
           } catch(e) {
-              alert("上傳失敗，請檢查網路");
               setSyncStatus('上傳失敗');
+              alert("上傳失敗，請檢查網路");
           } finally {
               setIsSyncing(false);
           }
       };
 
-      // 匯出 JSON
+      // 手動：強制下載 (Pull)
+      const handleForcePull = () => {
+          if(!confirm("確定要放棄本機修改，重新下載雲端資料嗎？")) return;
+          syncData(true); // forcePull = true
+      };
+
+      // 匯出入
       const handleExport = () => {
           const data = { entries, projects, financeData, fabList, dataTimestamp: Date.now() };
           const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = url;
-          a.download = `life_compass_backup_${new Date().toISOString().slice(0,10)}.json`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          a.href = url; a.download = `life_compass_backup_${new Date().toISOString().slice(0,10)}.json`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
       };
-
-      // 匯入 JSON
       const handleImport = (e) => {
           const file = e.target.files[0];
           if (!file) return;
@@ -545,30 +562,23 @@
           reader.onload = (event) => {
               try {
                   const data = JSON.parse(event.target.result);
-                  if(confirm(`確定要還原備份嗎？\n這將覆蓋現有資料，且會自動同步至雲端。`)) {
+                  if(confirm(`確定要還原備份嗎？`)) {
                       if(data.entries) setEntries(data.entries);
                       if(data.projects) setProjects(data.projects);
                       if(data.financeData) setFinanceData(data.financeData);
                       if(data.fabList) setFabList(data.fabList);
-                      alert("還原成功！請等待自動同步完成。");
+                      alert("還原成功！自動同步中...");
                   }
               } catch(err) { alert("檔案格式錯誤"); }
           };
           reader.readAsText(file);
       };
 
-      // 重置資產數據 (Hard Reset)
-      const handleResetFinance = () => {
-          if(confirm("確定要重置資產數據為預設值嗎？(將清除所有手動紀錄)")) {
-              setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA));
-          }
-      };
-
       const renderContent = () => {
          switch(activeTab) {
             case AppTab.JOURNAL: return <JournalView entries={entries} projects={projects} onUpdateEntries={setEntries} apiKey={apiKey} fabList={fabList} onAddFab={(fab) => setFabList([fab, ...fabList])} />;
             case AppTab.PROJECTS: return <ProjectView projects={projects} onUpdateProjects={setProjects} />;
-            case AppTab.FINANCE: return <FinanceView data={financeData} onAddData={(d) => setFinanceData([...financeData, d].sort((a,b)=>new Date(a.date)-new Date(b.date)))} onResetData={handleResetFinance} />;
+            case AppTab.FINANCE: return <FinanceView data={financeData} onAddData={(d) => setFinanceData([...financeData, d].sort((a,b)=>new Date(a.date)-new Date(b.date)))} onResetData={() => setFinanceData(parseAssetData(INITIAL_RAW_ASSET_DATA))} />;
             case AppTab.FAB: return <FABView fabList={fabList} onUpdateFab={setFabList} />;
             default: return <div className="p-10 text-center text-slate-400">功能開發中</div>;
          }
@@ -590,26 +600,26 @@
                     </div>
 
                     <div className="space-y-3">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">備份與還原</h4>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">雲端同步</h4>
                         <div className="grid grid-cols-2 gap-3">
-                            <button onClick={handleExport} className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl hover:bg-indigo-50 hover:border-indigo-200 transition text-slate-600 hover:text-indigo-600 shadow-sm">
-                                <Download size={20} className="mb-1"/>
-                                <span className="text-xs font-bold">下載 JSON</span>
+                            <button onClick={handleForcePull} className="flex flex-col items-center justify-center p-3 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition text-indigo-700 shadow-sm">
+                                <CloudDownload size={24} className="mb-1"/>
+                                <span className="text-xs font-bold">📥 從雲端下載</span>
                             </button>
-                            <label className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl hover:bg-amber-50 hover:border-amber-200 transition text-slate-600 hover:text-amber-600 cursor-pointer shadow-sm">
-                                <Upload size={20} className="mb-1"/>
-                                <span className="text-xs font-bold">上傳 JSON</span>
+                            <button onClick={handleForcePush} className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl hover:bg-red-50 hover:border-red-200 transition text-slate-600 hover:text-red-600 shadow-sm">
+                                <CloudUpload size={24} className="mb-1"/>
+                                <span className="text-xs font-bold">📤 強制上傳</span>
+                            </button>
+                        </div>
+                        
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mt-4">本機備份</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={handleExport} className="flex items-center justify-center p-2 bg-white border border-slate-200 rounded-lg text-slate-500 text-xs hover:bg-slate-50"><Download size={14} className="mr-1"/>下載 JSON</button>
+                            <label className="flex items-center justify-center p-2 bg-white border border-slate-200 rounded-lg text-slate-500 text-xs hover:bg-slate-50 cursor-pointer">
+                                <Upload size={14} className="mr-1"/>匯入 JSON
                                 <input type="file" accept=".json" className="hidden" onChange={handleImport}/>
                             </label>
                         </div>
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                            <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400">Danger Zone</span></div>
-                        </div>
-                        <button onClick={handleForceSync} className="w-full flex items-center justify-center p-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition">
-                            <CloudUpload size={18} className="mr-2"/> 強制覆寫雲端資料
-                        </button>
-                        <p className="text-[10px] text-slate-400 text-center">若手機/電腦資料不一致，請在資料正確的裝置按此鈕。</p>
                     </div>
 
                     <div className="space-y-2 border-t border-slate-100 pt-4">
@@ -621,7 +631,7 @@
            )}
 
            <header className="bg-white/90 backdrop-blur px-4 h-14 flex items-center justify-between border-b border-slate-200 sticky top-0 z-30">
-              <div className="font-black text-lg text-slate-800 flex items-center"><Compass className="mr-2 text-indigo-600"/> LifeOS 2.6</div>
+              <div className="font-black text-lg text-slate-800 flex items-center"><Compass className="mr-2 text-indigo-600"/> LifeOS 2.7</div>
               <div className="flex items-center gap-3">
                  <div className="text-[10px] font-medium text-slate-400 flex items-center bg-slate-100 px-2 py-1 rounded-full">
                     {isSyncing ? <RefreshCw size={10} className="animate-spin mr-1 text-indigo-500"/> : <Cloud size={10} className={`mr-1 ${syncStatus.includes('失敗') ? 'text-red-500' : 'text-green-500'}`}/>}
